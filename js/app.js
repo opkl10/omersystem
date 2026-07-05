@@ -1057,32 +1057,56 @@ function removedBefore(t) {
   return removed;
 }
 
-// זיהוי קטעים שקטים לפי עוצמת RMS בחלונות של 50ms
-function detectSilences(audio, sampleRate, thresholdDb, minDur, pad) {
+// עוצמת RMS בדציבלים לכל חלון של 50ms
+function windowLevelsDb(audio, sampleRate) {
   const win = Math.round(sampleRate * 0.05);
-  const threshold = Math.pow(10, thresholdDb / 20);
-  const silences = [];
-  let segStart = null;
+  const dbs = [];
   for (let i = 0; i < audio.length; i += win) {
     const end = Math.min(i + win, audio.length);
     let sum = 0;
     for (let j = i; j < end; j++) sum += audio[j] * audio[j];
     const rms = Math.sqrt(sum / (end - i));
-    const t = i / sampleRate;
-    if (rms < threshold) {
+    dbs.push(rms > 0 ? 20 * Math.log10(rms) : -100);
+  }
+  return dbs;
+}
+
+// סף אוטומטי גלובלי: נגזר מהתפלגות רמות הקול של הסרטון עצמו —
+// רצפת הרעש (אחוזון 10) ורמת הדיבור (אחוזון 90), והסף ביניהן
+function autoThresholdDb(dbs) {
+  const sorted = [...dbs].sort((a, b) => a - b);
+  const q = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
+  const noiseFloor = q(0.1);
+  const speechLevel = q(0.9);
+  if (speechLevel - noiseFloor < 8) return null; // אין הפרש ברור בין דיבור לשקט
+  return noiseFloor + (speechLevel - noiseFloor) * 0.35;
+}
+
+// זיהוי קטעים שקטים לפי סף בדציבלים
+function detectSilences(dbs, sampleRate, thresholdDb, minDur, pad) {
+  const winSec = 0.05;
+  const silences = [];
+  let segStart = null;
+  for (let i = 0; i < dbs.length; i++) {
+    const t = i * winSec;
+    if (dbs[i] < thresholdDb) {
       if (segStart === null) segStart = t;
     } else if (segStart !== null) {
       if (t - segStart >= minDur) silences.push({ start: segStart, end: t });
       segStart = null;
     }
   }
-  const total = audio.length / sampleRate;
+  const total = dbs.length * winSec;
   if (segStart !== null && total - segStart >= minDur) silences.push({ start: segStart, end: total });
   // ריפוד: משאירים שוליים סביב הדיבור משני צידי כל קטע שקט
   return silences
     .map(c => ({ start: c.start + pad, end: c.end - pad }))
     .filter(c => c.end - c.start > 0.1);
 }
+
+$('sel-silence-mode').addEventListener('change', () => {
+  $('silence-threshold-group').hidden = $('sel-silence-mode').value !== 'manual';
+});
 
 async function detectSilencesInMedia() {
   const status = $('cuts-status');
@@ -1094,15 +1118,30 @@ async function detectSilencesInMedia() {
   status.textContent = 'מנתח את האודיו...';
   try {
     const audio = await extractAudio(state.mediaFile);
-    const thresholdDb = Number($('rng-silence-threshold').value);
+    const dbs = windowLevelsDb(audio, 16000);
+
+    let thresholdDb;
+    let thresholdNote = '';
+    if ($('sel-silence-mode').value === 'auto') {
+      const auto = autoThresholdDb(dbs);
+      if (auto === null) {
+        status.textContent = 'לא נמצא הפרש ברור בין דיבור לשקט בסרטון הזה. נסו את השיטה הידנית עם סף גבוה.';
+        return;
+      }
+      thresholdDb = auto;
+      thresholdNote = ` (סף אוטומטי: ${auto.toFixed(0)}dB)`;
+    } else {
+      thresholdDb = Number($('rng-silence-threshold').value);
+    }
+
     const minDur = Number($('rng-silence-mindur').value);
     const pad = Number($('rng-silence-pad').value);
-    state.cuts = detectSilences(audio, 16000, thresholdDb, minDur, pad);
+    state.cuts = detectSilences(dbs, 16000, thresholdDb, minDur, pad);
     const saved = state.cuts.reduce((n, c) => n + (c.end - c.start), 0);
     const total = audio.length / 16000;
     status.textContent = state.cuts.length
-      ? `✂️ נמצאו ${state.cuts.length} קטעים שקטים — סה"כ ${saved.toFixed(1)} שניות (${Math.round(saved / total * 100)}% מהסרטון) יימחקו בייצוא.`
-      : 'לא נמצאו קטעים שקטים בהגדרות האלה. נסו להעלות את הסף או לקצר את המשך המינימלי.';
+      ? `✂️ נמצאו ${state.cuts.length} קטעים שקטים — סה"כ ${saved.toFixed(1)} שניות (${Math.round(saved / total * 100)}% מהסרטון) יימחקו בייצוא${thresholdNote}.`
+      : `לא נמצאו קטעים שקטים${thresholdNote}. נסו לקצר את "משך שקט מינימלי" — אולי ההפסקות בסרטון קצרות.`;
     renderTimeline();
   } catch (err) {
     status.textContent = '❌ הניתוח נכשל: ' + (err.message || err);
