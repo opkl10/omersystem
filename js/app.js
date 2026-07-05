@@ -1549,8 +1549,9 @@ try {
   if (savedKey) $('input-elevenlabs-key').value = savedKey;
 } catch (_) {}
 
-// בניית כתוביות מרשימת מילים עם תזמון: שבירה בסוף משפט, בהפסקת דיבור או אחרי 10 מילים
-function wordsToSubtitles(words) {
+// בניית כתוביות מרשימת מילים עם תזמון: שבירה אחרי maxWords מילים,
+// בסוף משפט או בהפסקת דיבור ארוכה
+function wordsToSubtitles(words, maxWords = 10) {
   const subs = [];
   let cur = null;
   for (const w of words) {
@@ -1565,10 +1566,16 @@ function wordsToSubtitles(words) {
       cur.end = w.end;
       cur.count++;
     }
-    if (/[.!?…]$/.test(text) || cur.count >= 10) { subs.push(cur); cur = null; }
+    if (/[.!?…]$/.test(text) || cur.count >= maxWords) { subs.push(cur); cur = null; }
   }
   if (cur) subs.push(cur);
-  return subs.map(s => ({ start: s.start, end: Math.max(s.end, s.start + 0.5), text: s.text }));
+  return subs.map(s => ({ start: s.start, end: Math.max(s.end, s.start + 0.4), text: s.text }));
+}
+
+// גודל הקבוצה שנבחר בטאב התמלול: מספר מילים, או null עבור "שורה שלמה"
+function transcribeGranularity() {
+  const v = $('sel-transcribe-granularity').value;
+  return v === 'sentence' ? null : Number(v);
 }
 
 async function transcribeWithElevenLabs(status) {
@@ -1595,7 +1602,8 @@ async function transcribeWithElevenLabs(status) {
     throw new Error(detail);
   }
   const data = await res.json();
-  if (data.words && data.words.length) return wordsToSubtitles(data.words);
+  const maxWords = transcribeGranularity() || 10;
+  if (data.words && data.words.length) return wordsToSubtitles(data.words, maxWords);
   if (data.text && data.text.trim()) {
     // בלי תזמון מילים — מפזרים על אורך הסרטון
     return splitTranscriptChunk(data.text.trim(), 0, state.duration || 60);
@@ -1630,19 +1638,34 @@ async function transcribeVideo() {
 
       status.textContent = 'מתמלל... (בסרטון ארוך זה עשוי לקחת כמה דקות)';
       const lang = $('sel-speech-lang').value;
+      const granularity = transcribeGranularity();
       const result = await transcriber(audio, {
         chunk_length_s: 30,
         stride_length_s: 5,
-        return_timestamps: true,
+        // חלוקה לפי מילים דורשת תזמון ברמת מילה; לפי משפטים מספיק תזמון לקטע
+        return_timestamps: granularity ? 'word' : true,
         ...(lang !== 'auto' ? { language: lang, task: 'transcribe' } : {}),
       });
 
-      let prevEnd = 0;
-      for (const c of (result.chunks || []).filter(ch => (ch.text || '').trim())) {
-        const start = c.timestamp[0] ?? prevEnd;
-        const end = c.timestamp[1] ?? (start + 3);
-        pieces.push(...splitTranscriptChunk(c.text.trim(), start, end));
-        prevEnd = end;
+      if (granularity) {
+        const words = (result.chunks || [])
+          .map(c => ({ text: (c.text || '').trim(), start: c.timestamp[0], end: c.timestamp[1] }))
+          .filter(w => w.text);
+        let prev = 0;
+        for (const w of words) {
+          if (w.start == null || !isFinite(w.start)) w.start = prev;
+          if (w.end == null || !isFinite(w.end)) w.end = w.start + 0.3;
+          prev = w.end;
+        }
+        pieces = wordsToSubtitles(words, granularity);
+      } else {
+        let prevEnd = 0;
+        for (const c of (result.chunks || []).filter(ch => (ch.text || '').trim())) {
+          const start = c.timestamp[0] ?? prevEnd;
+          const end = c.timestamp[1] ?? (start + 3);
+          pieces.push(...splitTranscriptChunk(c.text.trim(), start, end));
+          prevEnd = end;
+        }
       }
     }
 
