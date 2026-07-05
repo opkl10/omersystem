@@ -1193,6 +1193,75 @@ function splitTranscriptChunk(text, start, end) {
   return out;
 }
 
+// ---------- תמלול עם ElevenLabs Scribe ----------
+$('sel-transcribe-engine').addEventListener('change', () => {
+  const el = $('sel-transcribe-engine').value === 'elevenlabs';
+  $('elevenlabs-key-group').hidden = !el;
+  $('whisper-model-group').hidden = el;
+});
+
+$('input-elevenlabs-key').addEventListener('change', () => {
+  try { localStorage.setItem('elevenlabs-api-key', $('input-elevenlabs-key').value.trim()); } catch (_) {}
+});
+try {
+  const savedKey = localStorage.getItem('elevenlabs-api-key');
+  if (savedKey) $('input-elevenlabs-key').value = savedKey;
+} catch (_) {}
+
+// בניית כתוביות מרשימת מילים עם תזמון: שבירה בסוף משפט, בהפסקת דיבור או אחרי 10 מילים
+function wordsToSubtitles(words) {
+  const subs = [];
+  let cur = null;
+  for (const w of words) {
+    if (w.type && w.type !== 'word') continue;
+    const text = (w.text || '').trim();
+    if (!text) continue;
+    if (cur && (w.start - cur.end > 0.8)) { subs.push(cur); cur = null; }
+    if (!cur) {
+      cur = { start: w.start, end: w.end, text, count: 1 };
+    } else {
+      cur.text += ' ' + text;
+      cur.end = w.end;
+      cur.count++;
+    }
+    if (/[.!?…]$/.test(text) || cur.count >= 10) { subs.push(cur); cur = null; }
+  }
+  if (cur) subs.push(cur);
+  return subs.map(s => ({ start: s.start, end: Math.max(s.end, s.start + 0.5), text: s.text }));
+}
+
+async function transcribeWithElevenLabs(status) {
+  const apiKey = $('input-elevenlabs-key').value.trim();
+  if (!apiKey) throw new Error('הזינו מפתח API של ElevenLabs');
+
+  status.textContent = 'מעלה את הקובץ ל-ElevenLabs ומתמלל...';
+  const form = new FormData();
+  form.append('file', state.mediaFile);
+  form.append('model_id', 'scribe_v1');
+  form.append('timestamps_granularity', 'word');
+  const lang = $('sel-speech-lang').value;
+  if (lang !== 'auto') form.append('language_code', lang);
+
+  const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+    method: 'POST',
+    headers: { 'xi-api-key': apiKey },
+    body: form,
+  });
+  if (res.status === 401) throw new Error('מפתח ה-API לא תקין או שפג תוקפו');
+  if (!res.ok) {
+    let detail = 'HTTP ' + res.status;
+    try { detail = (await res.json()).detail?.message || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  const data = await res.json();
+  if (data.words && data.words.length) return wordsToSubtitles(data.words);
+  if (data.text && data.text.trim()) {
+    // בלי תזמון מילים — מפזרים על אורך הסרטון
+    return splitTranscriptChunk(data.text.trim(), 0, state.duration || 60);
+  }
+  return [];
+}
+
 async function transcribeVideo() {
   if (transcribing) return;
   const status = $('transcribe-status');
@@ -1205,25 +1274,38 @@ async function transcribeVideo() {
   $('btn-transcribe').disabled = true;
 
   try {
-    status.textContent = 'טוען את ספריית התמלול...';
-    setTranscribeProgress(0);
-    const transcriber = await getTranscriber($('sel-whisper-model').value, status);
+    let pieces = [];
 
-    status.textContent = 'מחלץ אודיו מהסרטון...';
-    setTranscribeProgress(null);
-    const audio = await extractAudio(state.mediaFile);
+    if ($('sel-transcribe-engine').value === 'elevenlabs') {
+      pieces = await transcribeWithElevenLabs(status);
+    } else {
+      status.textContent = 'טוען את ספריית התמלול...';
+      setTranscribeProgress(0);
+      const transcriber = await getTranscriber($('sel-whisper-model').value, status);
 
-    status.textContent = 'מתמלל... (בסרטון ארוך זה עשוי לקחת כמה דקות)';
-    const lang = $('sel-speech-lang').value;
-    const result = await transcriber(audio, {
-      chunk_length_s: 30,
-      stride_length_s: 5,
-      return_timestamps: true,
-      ...(lang !== 'auto' ? { language: lang, task: 'transcribe' } : {}),
-    });
+      status.textContent = 'מחלץ אודיו מהסרטון...';
+      setTranscribeProgress(null);
+      const audio = await extractAudio(state.mediaFile);
 
-    const chunks = (result.chunks || []).filter(c => (c.text || '').trim());
-    if (!chunks.length) {
+      status.textContent = 'מתמלל... (בסרטון ארוך זה עשוי לקחת כמה דקות)';
+      const lang = $('sel-speech-lang').value;
+      const result = await transcriber(audio, {
+        chunk_length_s: 30,
+        stride_length_s: 5,
+        return_timestamps: true,
+        ...(lang !== 'auto' ? { language: lang, task: 'transcribe' } : {}),
+      });
+
+      let prevEnd = 0;
+      for (const c of (result.chunks || []).filter(ch => (ch.text || '').trim())) {
+        const start = c.timestamp[0] ?? prevEnd;
+        const end = c.timestamp[1] ?? (start + 3);
+        pieces.push(...splitTranscriptChunk(c.text.trim(), start, end));
+        prevEnd = end;
+      }
+    }
+
+    if (!pieces.length) {
       status.textContent = 'לא זוהה דיבור בסרטון.';
       return;
     }
@@ -1233,23 +1315,15 @@ async function transcribeVideo() {
       state.selectedId = null;
     }
 
-    let prevEnd = 0;
-    let created = 0;
-    for (const c of chunks) {
-      const start = c.timestamp[0] ?? prevEnd;
-      const end = c.timestamp[1] ?? (start + 3);
-      for (const piece of splitTranscriptChunk(c.text.trim(), start, end)) {
-        state.subtitles.push({ id: state.nextId++, start: piece.start, end: piece.end, text: piece.text, style: null });
-        created++;
-      }
-      prevEnd = end;
+    for (const piece of pieces) {
+      state.subtitles.push({ id: state.nextId++, start: piece.start, end: piece.end, text: piece.text, style: null });
     }
     sortSubtitles();
     renderAll();
-    status.textContent = `✅ נוצרו ${created} כתוביות מהתמלול. אפשר לערוך אותן בטאב "כתוביות" או לתרגם בטאב "תרגום".`;
+    status.textContent = `✅ נוצרו ${pieces.length} כתוביות מהתמלול. אפשר לערוך אותן בטאב "כתוביות" או לתרגם בטאב "תרגום".`;
   } catch (err) {
     status.textContent = '❌ התמלול נכשל: ' + (err.message || err) +
-      ' — ודאו חיבור לאינטרנט להורדת המודל. (בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו מקומית)';
+      ' — ודאו חיבור לאינטרנט. (בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו מקומית)';
   } finally {
     setTranscribeProgress(null);
     transcribing = false;

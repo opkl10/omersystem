@@ -245,6 +245,21 @@
         </p>
 
         <div class="form-group">
+          <label>מנוע תמלול</label>
+          <select id="sel-transcribe-engine">
+            <option value="browser" selected>בדפדפן (Whisper) — חינם, פרטי, איטי יותר</option>
+            <option value="elevenlabs">ElevenLabs Scribe — מדויק ומהיר, דורש מפתח API</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="elevenlabs-key-group" hidden>
+          <label>מפתח API של ElevenLabs</label>
+          <input type="password" id="input-elevenlabs-key" placeholder="sk_..." autocomplete="off">
+          <p class="hint">המפתח נשמר רק בדפדפן שלכם (localStorage) ונשלח ישירות ל-ElevenLabs בלבד.
+            משיגים מפתח בחינם ב-elevenlabs.io › הגדרות › API Keys.</p>
+        </div>
+
+        <div class="form-group" id="whisper-model-group">
           <label>איכות מודל</label>
           <select id="sel-whisper-model">
             <option value="tiny" selected>מהיר — הורדה ~40MB, דיוק בסיסי</option>
