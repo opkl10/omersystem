@@ -197,6 +197,21 @@
       <!-- --- טאב תרגום --- -->
       <div class="tab-content" id="tab-translate">
         <div class="form-group">
+          <label>מנוע תרגום</label>
+          <select id="sel-translate-engine">
+            <option value="free" selected>חינמי (Google Translate + MyMemory)</option>
+            <option value="gemini">Gemini — איכותי יותר, דורש מפתח API חינמי</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="gemini-key-group" hidden>
+          <label>מפתח API של Gemini</label>
+          <input type="password" id="input-gemini-key" placeholder="AIza..." autocomplete="off">
+          <p class="hint">המפתח נשמר רק בדפדפן שלכם ונשלח ישירות לגוגל בלבד.
+            משיגים מפתח בחינם ב-aistudio.google.com › Get API Key.</p>
+        </div>
+
+        <div class="form-group">
           <label>שפת יעד</label>
           <select id="sel-target-lang">
             <option value="he">עברית</option>

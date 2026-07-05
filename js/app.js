@@ -778,11 +778,11 @@ $('input-import-project').addEventListener('change', (e) => {
 // ---------- תרגום אוטומטי ----------
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function fetchWithTimeout(url, ms = 15000) {
+async function fetchWithTimeout(url, ms = 15000, options = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), ms);
   try {
-    return await fetch(url, { signal: ctrl.signal });
+    return await fetch(url, { ...options, signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }
@@ -811,6 +811,70 @@ async function translateText(text, target) {
   }
 }
 
+// ---------- תרגום עם Gemini ----------
+$('sel-translate-engine').addEventListener('change', () => {
+  $('gemini-key-group').hidden = $('sel-translate-engine').value !== 'gemini';
+});
+$('input-gemini-key').addEventListener('change', () => {
+  try { localStorage.setItem('gemini-api-key', $('input-gemini-key').value.trim()); } catch (_) {}
+});
+try {
+  const savedGeminiKey = localStorage.getItem('gemini-api-key');
+  if (savedGeminiKey) $('input-gemini-key').value = savedGeminiKey;
+} catch (_) {}
+
+const LANG_NAMES = {
+  he: 'Hebrew', en: 'English', ar: 'Arabic', ru: 'Russian', fr: 'French',
+  es: 'Spanish', de: 'German', it: 'Italian', pt: 'Portuguese', 'zh-CN': 'Chinese',
+  ja: 'Japanese', ko: 'Korean', hi: 'Hindi', tr: 'Turkish', uk: 'Ukrainian', am: 'Amharic',
+};
+
+// תרגום קבוצת שורות בבת אחת — Gemini מקבל הקשר מלא ולכן התרגום עקבי יותר
+async function translateBatchWithGemini(texts, target, apiKey) {
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='
+    + encodeURIComponent(apiKey);
+  const prompt = 'Translate the following subtitle lines to ' + (LANG_NAMES[target] || target) + '.\n'
+    + 'These are consecutive subtitles from one video, so keep the translation consistent across lines.\n'
+    + 'Keep any *word* asterisk markers around the same words in the translation.\n'
+    + 'Return ONLY a JSON array of strings, one translated string per input line, same order and count.\n\n'
+    + JSON.stringify(texts);
+  const res = await fetchWithTimeout(url, 60000, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.2 },
+    }),
+  });
+  if (res.status === 400 || res.status === 403) throw new Error('מפתח ה-API של Gemini לא תקין');
+  if (res.status === 429) throw new Error('חריגה ממכסת הבקשות של Gemini — המתינו דקה ונסו שוב');
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  const out = JSON.parse(data.candidates[0].content.parts[0].text);
+  if (!Array.isArray(out) || out.length !== texts.length) throw new Error('תשובה לא תקינה מהמודל');
+  return out.map(String);
+}
+
+async function translateAllWithGemini(subs, target, mode, status) {
+  const apiKey = $('input-gemini-key').value.trim();
+  if (!apiKey) throw new Error('הזינו מפתח API של Gemini (מקבלים בחינם ב-aistudio.google.com)');
+  const BATCH = 40;
+  let done = 0;
+  for (let i = 0; i < subs.length; i += BATCH) {
+    const batch = subs.slice(i, i + BATCH);
+    status.textContent = `מתרגם עם Gemini... ${Math.min(i + BATCH, subs.length)} מתוך ${subs.length}`;
+    const translated = await translateBatchWithGemini(batch.map(s => s.text), target, apiKey);
+    batch.forEach((sub, j) => {
+      sub.text = (mode === 'append') ? sub.text + '\n' + translated[j] : translated[j];
+    });
+    done += batch.length;
+    renderSubtitleList();
+    renderTimeline();
+    renderOverlay(true);
+  }
+  return done;
+}
+
 let translating = false;
 
 async function translateSubtitles(subs) {
@@ -825,6 +889,21 @@ async function translateSubtitles(subs) {
 
   const target = $('sel-target-lang').value;
   const mode = document.querySelector('input[name="translate-mode"]:checked').value;
+
+  if ($('sel-translate-engine').value === 'gemini') {
+    try {
+      const done = await translateAllWithGemini(queue, target, mode, status);
+      status.textContent = `✅ תורגמו כל ${done} הכתוביות עם Gemini.`;
+    } catch (err) {
+      status.textContent = '❌ תרגום Gemini נכשל: ' + (err.message || err);
+    } finally {
+      translating = false;
+      $('btn-translate-all').disabled = false;
+      $('btn-translate-selected').disabled = false;
+    }
+    return;
+  }
+
   const total = queue.length;
   let done = 0;
   let pending = [...queue];
@@ -1113,7 +1192,12 @@ let transcribing = false;
 
 function loadTransformersLib() {
   if (!transformersPromise) {
-    transformersPromise = import(TRANSFORMERS_URL).catch(err => {
+    transformersPromise = import(TRANSFORMERS_URL).then(m => {
+      // בלי זה הספרייה מחפשת את המודל קודם בנתיב /models/ בשרת המקומי,
+      // מקבלת 404 ועלולה להיכשל במקום לרדת ישירות מהאינטרנט
+      if (m.env) m.env.allowLocalModels = false;
+      return m;
+    }).catch(err => {
       transformersPromise = null;
       throw err;
     });
