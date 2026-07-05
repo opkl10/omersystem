@@ -14,6 +14,7 @@ const DEFAULT_STYLE = {
   italic: false,
   position: 85,          // אחוז מגובה המסך (מלמעלה)
   maxWordsPerLine: 0,    // 0 = אוטומטי (בלי שבירת שורות)
+  maxLines: 0,           // 0 = בלי הגבלה; אחרת הכתובית מתחלפת בדפים של N שורות
   highlightColor: '#ffd400',
   highlightBold: true,
   effect: 'none',
@@ -34,6 +35,7 @@ const state = {
   nextId: 1,
   duration: 0,
   hasMedia: false,
+  cuts: [],               // קטעים שקטים למחיקה: { start, end }
 };
 
 // ---------- אלמנטים ----------
@@ -204,8 +206,16 @@ function timelineDuration() {
 }
 
 function renderTimeline() {
-  timelineEl.querySelectorAll('.timeline-block').forEach(el => el.remove());
+  timelineEl.querySelectorAll('.timeline-block, .timeline-cut').forEach(el => el.remove());
   const dur = timelineDuration();
+  for (const cut of state.cuts) {
+    const el = document.createElement('div');
+    el.className = 'timeline-cut';
+    el.style.left = (cut.start / dur * 100) + '%';
+    el.style.width = ((cut.end - cut.start) / dur * 100) + '%';
+    el.title = `קטע שקט שיימחק: ${formatTime(cut.start)} → ${formatTime(cut.end)}`;
+    timelineEl.appendChild(el);
+  }
   for (const sub of state.subtitles) {
     const block = document.createElement('div');
     block.className = 'timeline-block' + (sub.id === state.selectedId ? ' selected' : '');
@@ -272,6 +282,17 @@ function tick(now) {
     clockTime += (now - lastTick) / 1000;
     if (clockTime >= timelineDuration()) { clockTime = 0; clockPlaying = false; updatePlayButton(); }
   }
+  // דילוג על רגעים שקטים בתצוגה מקדימה (לא בזמן ייצוא — שם הלולאה מטפלת בזה)
+  if (!exportingVideo && state.cuts.length && $('chk-skip-silences').checked) {
+    const playing = state.hasMedia ? !video.paused : clockPlaying;
+    if (playing) {
+      const cut = activeCutAt(currentTime());
+      if (cut) {
+        if (state.hasMedia) video.currentTime = cut.end + 0.01;
+        else clockTime = cut.end + 0.01;
+      }
+    }
+  }
   lastTick = now;
   updateTimeUI();
   renderOverlay();
@@ -300,6 +321,48 @@ function wrapWords(text, maxWords) {
   }).join('\n');
 }
 
+// הדגשה של כמה מילים יחד ("*שתי מילים*") מפורקת לסימון פר-מילה,
+// כדי ששבירת שורות באמצע ההדגשה לא תשבור את הזיהוי
+function normalizeHighlights(text) {
+  return text.replace(/\*([^*\n]+)\*/g, (m, inner) =>
+    inner.split(/\s+/).filter(Boolean).map(w => '*' + w + '*').join(' '));
+}
+
+// הטקסט המוצג של כתובית בזמן t: שבירת שורות לפי "מילים בשורה",
+// ואם יש יותר שורות מ"שורות בכל פעם" — הכתובית מתחלפת בדפים לאורך משך הזמן שלה
+function subtitleDisplayText(sub, st, t) {
+  const wrapped = wrapWords(normalizeHighlights(sub.text), st.maxWordsPerLine);
+  const lines = wrapped.split('\n');
+  if (!st.maxLines || lines.length <= st.maxLines) return wrapped;
+  const pages = [];
+  for (let i = 0; i < lines.length; i += st.maxLines) {
+    pages.push(lines.slice(i, i + st.maxLines).join('\n'));
+  }
+  const dur = Math.max(sub.end - sub.start, 0.001);
+  let idx = Math.floor((t - sub.start) / dur * pages.length);
+  idx = Math.max(0, Math.min(pages.length - 1, idx));
+  return pages[idx];
+}
+
+// חלוקת כתובית לדפים עם פרוסות זמן — לייצוא SRT/VTT
+function subtitlePages(sub, st) {
+  const wrapped = wrapWords(normalizeHighlights(sub.text), st.maxWordsPerLine);
+  const lines = wrapped.split('\n');
+  if (!st.maxLines || lines.length <= st.maxLines) {
+    return [{ start: sub.start, end: sub.end, text: wrapped }];
+  }
+  const pages = [];
+  for (let i = 0; i < lines.length; i += st.maxLines) {
+    pages.push(lines.slice(i, i + st.maxLines).join('\n'));
+  }
+  const dur = (sub.end - sub.start) / pages.length;
+  return pages.map((text, i) => ({
+    start: sub.start + i * dur,
+    end: sub.start + (i + 1) * dur,
+    text,
+  }));
+}
+
 // פירוק טקסט לקטעים רגילים ומודגשים לפי תחביר *מילה*
 function parseHighlights(text) {
   const parts = [];
@@ -320,7 +383,9 @@ let lastActiveKey = '';
 function renderOverlay(force = false) {
   const t = currentTime();
   const active = state.subtitles.filter(s => t >= s.start && t < s.end);
-  const key = active.map(s => `${s.id}:${s.text}:${JSON.stringify(effectiveStyle(s))}`).join('|');
+  const key = active.map(s =>
+    `${s.id}:${subtitleDisplayText(s, effectiveStyle(s), t)}:${JSON.stringify(effectiveStyle(s))}`
+  ).join('|');
 
   if (!force && key === lastActiveKey) {
     updateTypewriters(t);
@@ -358,7 +423,7 @@ function renderOverlay(force = false) {
       span.style.backgroundColor = hexToRgba(st.bgColor, st.bgOpacity / 100);
     }
 
-    const displayText = wrapWords(sub.text, st.maxWordsPerLine);
+    const displayText = subtitleDisplayText(sub, st, t);
     const segments = parseHighlights(displayText);
     const hlStyle = (el) => {
       el.style.color = st.highlightColor;
@@ -427,6 +492,7 @@ const styleInputs = {
   italic: $('chk-italic'),
   position: $('rng-position'),
   maxWordsPerLine: $('rng-words-per-line'),
+  maxLines: $('rng-max-lines'),
   highlightColor: $('clr-highlight'),
   highlightBold: $('chk-highlight-bold'),
   effect: $('sel-effect'),
@@ -459,6 +525,7 @@ function syncStylePanel() {
   styleInputs.italic.checked = st.italic;
   styleInputs.position.value = st.position;
   styleInputs.maxWordsPerLine.value = st.maxWordsPerLine;
+  styleInputs.maxLines.value = st.maxLines;
   styleInputs.highlightColor.value = st.highlightColor;
   styleInputs.highlightBold.checked = st.highlightBold;
   styleInputs.effect.value = st.effect;
@@ -473,6 +540,8 @@ function updateStyleLabels() {
   $('position-value').textContent = styleInputs.position.value;
   const wpl = Number(styleInputs.maxWordsPerLine.value);
   $('words-per-line-value').textContent = wpl === 0 ? 'אוטומטי' : wpl;
+  const ml = Number(styleInputs.maxLines.value);
+  $('max-lines-value').textContent = ml === 0 ? 'בלי הגבלה' : ml;
   $('effect-duration-value').textContent = styleInputs.effectDuration.value;
 }
 
@@ -488,6 +557,7 @@ function readStyleFromPanel(target) {
   target.italic = styleInputs.italic.checked;
   target.position = Number(styleInputs.position.value);
   target.maxWordsPerLine = Number(styleInputs.maxWordsPerLine.value);
+  target.maxLines = Number(styleInputs.maxLines.value);
   target.highlightColor = styleInputs.highlightColor.value;
   target.highlightBold = styleInputs.highlightBold.checked;
   target.effect = styleInputs.effect.value;
@@ -689,11 +759,9 @@ function vttTime(sec) {
   return srtTime(sec).replace(',', '.');
 }
 
-// טקסט לייצוא: שבירת שורות לפי "מילים בשורה" + תגיות הדגשה
-function subtitleExportText(sub, format) {
-  const st = effectiveStyle(sub);
-  const wrapped = wrapWords(sub.text, st.maxWordsPerLine);
-  return parseHighlights(wrapped).map(seg => {
+// טקסט דף בודד לייצוא, עם תגיות הדגשה בפורמט המתאים
+function pageExportText(text, st, format) {
+  return parseHighlights(text).map(seg => {
     if (!seg.hl) return seg.text;
     if (format === 'srt') {
       const inner = st.highlightBold ? `<b>${seg.text}</b>` : seg.text;
@@ -703,30 +771,47 @@ function subtitleExportText(sub, format) {
   }).join('');
 }
 
-function exportSRT() {
+// כל רשומות הייצוא: דפים לפי "שורות בכל פעם", עם התאמת זמנים לסרטון חתוך
+function buildExportCues(format) {
   sortSubtitles();
-  const out = state.subtitles.map((s, i) =>
-    `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${subtitleExportText(s, 'srt')}\n`
+  const cues = [];
+  for (const sub of state.subtitles) {
+    const st = effectiveStyle(sub);
+    for (const page of subtitlePages(sub, st)) {
+      let start = page.start, end = page.end;
+      if (state.cuts.length) {
+        start -= removedBefore(start);
+        end -= removedBefore(end);
+        if (end - start < 0.05) continue; // הדף כולו בתוך קטע שנמחק
+      }
+      cues.push({ start, end, text: pageExportText(page.text, st, format), position: st.position });
+    }
+  }
+  return cues;
+}
+
+function exportSRT() {
+  const out = buildExportCues('srt').map((c, i) =>
+    `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}\n`
   ).join('\n');
   downloadFile('subtitles.srt', out, 'text/plain');
 }
 
 function exportVTT() {
-  sortSubtitles();
   let out = 'WEBVTT\n\n';
-  out += state.subtitles.map((s, i) => {
-    const st = effectiveStyle(s);
-    return `${i + 1}\n${vttTime(s.start)} --> ${vttTime(s.end)} line:${Math.round(st.position)}%\n${subtitleExportText(s, 'vtt')}\n`;
-  }).join('\n');
+  out += buildExportCues('vtt').map((c, i) =>
+    `${i + 1}\n${vttTime(c.start)} --> ${vttTime(c.end)} line:${Math.round(c.position)}%\n${c.text}\n`
+  ).join('\n');
   downloadFile('subtitles.vtt', out, 'text/vtt');
 }
 
 function saveProject() {
   const data = {
-    version: 1,
+    version: 2,
     subtitles: state.subtitles,
     globalStyle: state.globalStyle,
     customFonts: state.customFonts,
+    cuts: state.cuts,
   };
   downloadFile('subtitle-project.json', JSON.stringify(data, null, 2), 'application/json');
 }
@@ -739,6 +824,7 @@ async function importProject(file) {
       style: s.style ? { ...DEFAULT_STYLE, ...s.style } : null,
     }));
     state.globalStyle = { ...DEFAULT_STYLE, ...(data.globalStyle || {}) };
+    state.cuts = Array.isArray(data.cuts) ? data.cuts : [];
     state.customFonts = [];
     for (const f of (data.customFonts || [])) {
       try {
@@ -956,6 +1042,104 @@ $('btn-translate-selected').addEventListener('click', () => {
   translateSubtitles([sub]);
 });
 
+// ---------- מחיקת רגעים שקטים ----------
+function activeCutAt(t) {
+  return state.cuts.find(c => t >= c.start && t < c.end) || null;
+}
+
+// כמה זמן הוסר מהסרטון לפני הזמן t (למיפוי תזמון הכתוביות לסרטון החתוך)
+function removedBefore(t) {
+  let removed = 0;
+  for (const c of state.cuts) {
+    if (t >= c.end) removed += c.end - c.start;
+    else if (t > c.start) removed += t - c.start;
+  }
+  return removed;
+}
+
+// זיהוי קטעים שקטים לפי עוצמת RMS בחלונות של 50ms
+function detectSilences(audio, sampleRate, thresholdDb, minDur, pad) {
+  const win = Math.round(sampleRate * 0.05);
+  const threshold = Math.pow(10, thresholdDb / 20);
+  const silences = [];
+  let segStart = null;
+  for (let i = 0; i < audio.length; i += win) {
+    const end = Math.min(i + win, audio.length);
+    let sum = 0;
+    for (let j = i; j < end; j++) sum += audio[j] * audio[j];
+    const rms = Math.sqrt(sum / (end - i));
+    const t = i / sampleRate;
+    if (rms < threshold) {
+      if (segStart === null) segStart = t;
+    } else if (segStart !== null) {
+      if (t - segStart >= minDur) silences.push({ start: segStart, end: t });
+      segStart = null;
+    }
+  }
+  const total = audio.length / sampleRate;
+  if (segStart !== null && total - segStart >= minDur) silences.push({ start: segStart, end: total });
+  // ריפוד: משאירים שוליים סביב הדיבור משני צידי כל קטע שקט
+  return silences
+    .map(c => ({ start: c.start + pad, end: c.end - pad }))
+    .filter(c => c.end - c.start > 0.1);
+}
+
+async function detectSilencesInMedia() {
+  const status = $('cuts-status');
+  if (!state.mediaFile) {
+    status.textContent = 'טענו קודם קובץ וידאו או אודיו.';
+    return;
+  }
+  $('btn-detect-silence').disabled = true;
+  status.textContent = 'מנתח את האודיו...';
+  try {
+    const audio = await extractAudio(state.mediaFile);
+    const thresholdDb = Number($('rng-silence-threshold').value);
+    const minDur = Number($('rng-silence-mindur').value);
+    const pad = Number($('rng-silence-pad').value);
+    state.cuts = detectSilences(audio, 16000, thresholdDb, minDur, pad);
+    const saved = state.cuts.reduce((n, c) => n + (c.end - c.start), 0);
+    const total = audio.length / 16000;
+    status.textContent = state.cuts.length
+      ? `✂️ נמצאו ${state.cuts.length} קטעים שקטים — סה"כ ${saved.toFixed(1)} שניות (${Math.round(saved / total * 100)}% מהסרטון) יימחקו בייצוא.`
+      : 'לא נמצאו קטעים שקטים בהגדרות האלה. נסו להעלות את הסף או לקצר את המשך המינימלי.';
+    renderTimeline();
+  } catch (err) {
+    status.textContent = '❌ הניתוח נכשל: ' + (err.message || err);
+  } finally {
+    $('btn-detect-silence').disabled = false;
+  }
+}
+
+$('btn-detect-silence').addEventListener('click', detectSilencesInMedia);
+$('btn-clear-cuts').addEventListener('click', () => {
+  state.cuts = [];
+  $('cuts-status').textContent = 'החיתוך נוקה.';
+  renderTimeline();
+});
+
+for (const id of ['rng-silence-threshold', 'rng-silence-mindur', 'rng-silence-pad']) {
+  $(id).addEventListener('input', () => {
+    $('silence-threshold-value').textContent = $('rng-silence-threshold').value;
+    $('silence-mindur-value').textContent = $('rng-silence-mindur').value;
+    $('silence-pad-value').textContent = $('rng-silence-pad').value;
+  });
+}
+
+// עוצמת אפקט המעבר (0..1) לפי הקרבה לנקודת חיתוך
+function cutTransitionIntensity(t, style) {
+  if (style === 'none' || !state.cuts.length) return 0;
+  const D = style === 'flash' ? 0.12 : 0.18;
+  let k = 0;
+  for (const c of state.cuts) {
+    const before = c.start - t;
+    const after = t - c.end;
+    if (before >= 0 && before < D) k = Math.max(k, 1 - before / D);
+    if (after >= 0 && after < D) k = Math.max(k, 1 - after / D);
+  }
+  return k;
+}
+
 // ---------- ייצוא וידאו עם כתוביות צרובות ----------
 let exportingVideo = false;
 let exportRecorder = null;
@@ -992,7 +1176,7 @@ function drawSubtitlesOnCanvas(ctx, W, H, t, scale) {
 
     const fontPx = st.fontSize * scale;
     const lineH = fontPx * 1.35;
-    const wrapped = wrapWords(sub.text, st.maxWordsPerLine);
+    const wrapped = subtitleDisplayText(sub, st, t);
     const lines = wrapped.split('\n').map(parseHighlights);
     const rtl = /[֐-ࣿ]/.test(wrapped);
 
@@ -1163,9 +1347,43 @@ async function exportVideoWithSubtitles() {
 
   const drawLoop = () => {
     if (!exportingVideo || !exportRecorder) return;
-    ctx.drawImage(video, 0, 0, W, H);
-    drawSubtitlesOnCanvas(ctx, W, H, video.currentTime, scale);
-    $('export-video-progress').style.width = (video.currentTime / video.duration * 100) + '%';
+    const t = video.currentTime;
+
+    // דילוג על רגעים שקטים — הקפיצה לא מוקלטת, כך שהם נמחקים מהתוצאה
+    const cut = activeCutAt(t);
+    if (cut && cut.end < video.duration - 0.1) {
+      video.currentTime = cut.end + 0.01;
+    } else if (cut) {
+      // הקטע השקט מגיע עד סוף הסרטון — מסיימים כאן
+      if (exportRecorder.state !== 'inactive') exportRecorder.stop();
+      return;
+    }
+
+    const transition = $('sel-cut-transition').value;
+    const k = cutTransitionIntensity(t, transition);
+
+    if (transition === 'zoom' && k > 0) {
+      ctx.save();
+      const z = 1 + 0.08 * k;
+      ctx.translate(W / 2, H / 2);
+      ctx.scale(z, z);
+      ctx.translate(-W / 2, -H / 2);
+      ctx.drawImage(video, 0, 0, W, H);
+      ctx.restore();
+    } else {
+      ctx.drawImage(video, 0, 0, W, H);
+    }
+
+    drawSubtitlesOnCanvas(ctx, W, H, t, scale);
+
+    if (k > 0 && (transition === 'fade-black' || transition === 'flash')) {
+      ctx.fillStyle = transition === 'flash'
+        ? `rgba(255,255,255,${(k * 0.9).toFixed(3)})`
+        : `rgba(0,0,0,${k.toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    $('export-video-progress').style.width = (t / video.duration * 100) + '%';
     if (video.ended) {
       if (exportRecorder.state !== 'inactive') exportRecorder.stop();
       return;

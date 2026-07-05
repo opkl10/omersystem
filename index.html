@@ -70,6 +70,7 @@
         <button class="tab" data-tab="fonts">פונטים</button>
         <button class="tab" data-tab="translate">תרגום</button>
         <button class="tab" data-tab="transcribe">תמלול</button>
+        <button class="tab" data-tab="cuts">חיתוך</button>
       </div>
 
       <!-- --- טאב כתוביות --- -->
@@ -143,6 +144,12 @@
         <div class="form-group">
           <label>מילים בשורה: <span id="words-per-line-value">אוטומטי</span></label>
           <input type="range" id="rng-words-per-line" min="0" max="10" value="0">
+        </div>
+
+        <div class="form-group">
+          <label>שורות בכל פעם: <span id="max-lines-value">בלי הגבלה</span></label>
+          <input type="range" id="rng-max-lines" min="0" max="4" value="0">
+          <p class="hint">כשכתובית ארוכה מדי, היא תתחלף בדפים של עד N שורות לאורך זמן ההצגה שלה</p>
         </div>
 
         <div class="form-row">
@@ -310,6 +317,50 @@
         </div>
         <p id="transcribe-status" class="hint"></p>
         <p class="hint">אחרי התמלול אפשר לעבור לטאב "תרגום" ולתרגם את התוצאה לכל שפה.</p>
+      </div>
+
+      <!-- --- טאב חיתוך --- -->
+      <div class="tab-content" id="tab-cuts">
+        <p class="hint" style="margin-bottom:12px">
+          זיהוי אוטומטי של רגעים שקטים בסרטון ומחיקתם מהסרטון המיוצא.
+          החיתוך חל על "הורדת הסרטון עם הכתוביות" ועל ייצוא SRT/VTT — הסרטון המקורי לא נפגע.
+        </p>
+
+        <div class="form-group">
+          <label>סף שקט: <span id="silence-threshold-value">-40</span> dB</label>
+          <input type="range" id="rng-silence-threshold" min="-60" max="-20" value="-40">
+        </div>
+
+        <div class="form-group">
+          <label>משך שקט מינימלי למחיקה: <span id="silence-mindur-value">0.6</span> שניות</label>
+          <input type="range" id="rng-silence-mindur" min="0.3" max="3" step="0.1" value="0.6">
+        </div>
+
+        <div class="form-group">
+          <label>ריפוד סביב דיבור: <span id="silence-pad-value">0.15</span> שניות</label>
+          <input type="range" id="rng-silence-pad" min="0" max="0.5" step="0.05" value="0.15">
+        </div>
+
+        <div class="translate-actions">
+          <button id="btn-detect-silence" class="btn btn-primary">🔇 זיהוי רגעים שקטים</button>
+          <button id="btn-clear-cuts" class="btn">ניקוי החיתוך</button>
+        </div>
+        <p id="cuts-status" class="hint"></p>
+
+        <label class="checkbox-row" style="margin:10px 0">
+          <input type="checkbox" id="chk-skip-silences" checked>
+          דילוג על הרגעים השקטים גם בניגון בתצוגה המקדימה
+        </label>
+
+        <div class="form-group">
+          <label>אפקט מעבר בנקודות החיתוך</label>
+          <select id="sel-cut-transition">
+            <option value="none" selected>חיתוך ישיר (בלי אפקט)</option>
+            <option value="fade-black">עמעום לשחור</option>
+            <option value="flash">הבזק לבן</option>
+            <option value="zoom">זום קצר</option>
+          </select>
+        </div>
       </div>
     </aside>
   </main>

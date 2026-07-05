@@ -213,6 +213,15 @@ body {
   direction: rtl;
 }
 .timeline-block.selected { background: rgba(79, 124, 255, 0.85); box-shadow: 0 0 0 2px #fff3; }
+.timeline-cut {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(45deg, rgba(224,85,85,0.35), rgba(224,85,85,0.35) 4px, transparent 4px, transparent 8px);
+  border-inline: 1px solid rgba(224,85,85,0.7);
+  pointer-events: none;
+  z-index: 4;
+}
 .timeline-cursor {
   position: absolute;
   top: 0;
