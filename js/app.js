@@ -700,6 +700,78 @@ $('input-import-project').addEventListener('change', (e) => {
   e.target.value = '';
 });
 
+// ---------- תרגום אוטומטי ----------
+async function translateText(text, target) {
+  try {
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto'
+      + '&tl=' + encodeURIComponent(target) + '&dt=t&q=' + encodeURIComponent(text);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    return data[0].filter(Boolean).map(seg => seg[0]).join('');
+  } catch (_) {
+    const url2 = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text)
+      + '&langpair=Autodetect|' + encodeURIComponent(target);
+    const res2 = await fetch(url2);
+    if (!res2.ok) throw new Error('HTTP ' + res2.status);
+    const data2 = await res2.json();
+    if (data2.responseStatus !== 200) throw new Error(data2.responseDetails || 'התרגום נכשל');
+    return data2.responseData.translatedText;
+  }
+}
+
+let translating = false;
+
+async function translateSubtitles(subs) {
+  if (translating) return;
+  const status = $('translate-status');
+  if (!subs.length) { status.textContent = 'אין כתוביות לתרגום.'; return; }
+
+  translating = true;
+  $('btn-translate-all').disabled = true;
+  $('btn-translate-selected').disabled = true;
+
+  const target = $('sel-target-lang').value;
+  const mode = document.querySelector('input[name="translate-mode"]:checked').value;
+  let done = 0, failed = 0;
+
+  for (const sub of subs) {
+    status.textContent = `מתרגם... ${done + failed + 1} מתוך ${subs.length}`;
+    try {
+      const translated = await translateText(sub.text, target);
+      sub.text = (mode === 'append') ? sub.text + '\n' + translated : translated;
+      done++;
+      renderSubtitleList();
+      renderTimeline();
+      renderOverlay(true);
+    } catch (_) {
+      failed++;
+    }
+    // השהיה קצרה כדי לא להיחסם על ידי שירות התרגום
+    await new Promise(r => setTimeout(r, 250));
+  }
+
+  translating = false;
+  $('btn-translate-all').disabled = false;
+  $('btn-translate-selected').disabled = false;
+
+  if (failed === subs.length) {
+    status.textContent = '❌ לא ניתן לגשת לשירות התרגום. בדקו חיבור לאינטרנט. ' +
+      '(בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו אותו מקומית)';
+  } else if (failed > 0) {
+    status.textContent = `✅ תורגמו ${done} כתוביות, ${failed} נכשלו — נסו שוב.`;
+  } else {
+    status.textContent = `✅ תורגמו ${done} כתוביות בהצלחה.`;
+  }
+}
+
+$('btn-translate-all').addEventListener('click', () => translateSubtitles([...state.subtitles]));
+$('btn-translate-selected').addEventListener('click', () => {
+  const sub = getSubtitle(state.selectedId);
+  if (!sub) { $('translate-status').textContent = 'בחרו קודם כתובית בטאב "כתוביות".'; return; }
+  translateSubtitles([sub]);
+});
+
 // ---------- קיצורי מקלדת ----------
 document.addEventListener('keydown', (e) => {
   if (e.target.matches('input, textarea, select')) return;

@@ -362,6 +362,16 @@ body {
 }
 .font-list .empty-note { color: var(--text-dim); font-size: 0.8rem; border-style: dashed; }
 
+/* ===== תרגום ===== */
+.translate-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.translate-actions .btn { justify-content: center; }
+.btn:disabled { opacity: 0.5; cursor: wait; }
+
 /* ===== רספונסיביות ===== */
 @media (max-width: 900px) {
   .app-layout { flex-direction: column; overflow-y: auto; }

@@ -58,6 +58,7 @@
         <button class="tab active" data-tab="subtitles">כתוביות</button>
         <button class="tab" data-tab="style">עיצוב</button>
         <button class="tab" data-tab="fonts">פונטים</button>
+        <button class="tab" data-tab="translate">תרגום</button>
       </div>
 
       <!-- --- טאב כתוביות --- -->
@@ -164,6 +165,49 @@
         <ul class="font-list" id="custom-font-list">
           <li class="empty-note">לא הועלו פונטים עדיין</li>
         </ul>
+      </div>
+
+      <!-- --- טאב תרגום --- -->
+      <div class="tab-content" id="tab-translate">
+        <div class="form-group">
+          <label>שפת יעד</label>
+          <select id="sel-target-lang">
+            <option value="he">עברית</option>
+            <option value="en" selected>אנגלית</option>
+            <option value="ar">ערבית</option>
+            <option value="ru">רוסית</option>
+            <option value="fr">צרפתית</option>
+            <option value="es">ספרדית</option>
+            <option value="de">גרמנית</option>
+            <option value="it">איטלקית</option>
+            <option value="pt">פורטוגזית</option>
+            <option value="zh-CN">סינית</option>
+            <option value="ja">יפנית</option>
+            <option value="ko">קוריאנית</option>
+            <option value="hi">הינדי</option>
+            <option value="tr">טורקית</option>
+            <option value="uk">אוקראינית</option>
+            <option value="am">אמהרית</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="checkbox-row">
+            <input type="radio" name="translate-mode" value="replace" checked>
+            החלפת הטקסט המקורי בתרגום
+          </label>
+          <label class="checkbox-row">
+            <input type="radio" name="translate-mode" value="append">
+            הוספת התרגום מתחת למקור (דו־לשוני)
+          </label>
+        </div>
+
+        <div class="translate-actions">
+          <button id="btn-translate-all" class="btn btn-primary">🌐 תרגום כל הכתוביות</button>
+          <button id="btn-translate-selected" class="btn">תרגום הכתובית שנבחרה</button>
+        </div>
+        <p id="translate-status" class="hint"></p>
+        <p class="hint">שפת המקור מזוהה אוטומטית. התרגום משתמש ב-Google Translate (עם גיבוי MyMemory) ודורש חיבור לאינטרנט.</p>
       </div>
     </aside>
   </main>
