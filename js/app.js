@@ -776,22 +776,38 @@ $('input-import-project').addEventListener('change', (e) => {
 });
 
 // ---------- תרגום אוטומטי ----------
+const delay = (ms) => new Promise(r => setTimeout(r, ms));
+
+async function fetchWithTimeout(url, ms = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    return await fetch(url, { signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function translateText(text, target) {
   try {
     const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto'
       + '&tl=' + encodeURIComponent(target) + '&dt=t&q=' + encodeURIComponent(text);
-    const res = await fetch(url);
+    const res = await fetchWithTimeout(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    return data[0].filter(Boolean).map(seg => seg[0]).join('');
+    const out = data[0].filter(Boolean).map(seg => seg[0]).join('');
+    if (!out.trim()) throw new Error('תשובה ריקה');
+    return out;
   } catch (_) {
     const url2 = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text)
       + '&langpair=Autodetect|' + encodeURIComponent(target);
-    const res2 = await fetch(url2);
+    const res2 = await fetchWithTimeout(url2);
     if (!res2.ok) throw new Error('HTTP ' + res2.status);
     const data2 = await res2.json();
     if (data2.responseStatus !== 200) throw new Error(data2.responseDetails || 'התרגום נכשל');
-    return data2.responseData.translatedText;
+    const out2 = (data2.responseData.translatedText || '').trim();
+    if (!out2) throw new Error('תשובה ריקה');
+    return out2;
   }
 }
 
@@ -800,7 +816,8 @@ let translating = false;
 async function translateSubtitles(subs) {
   if (translating) return;
   const status = $('translate-status');
-  if (!subs.length) { status.textContent = 'אין כתוביות לתרגום.'; return; }
+  const queue = subs.filter(s => s.text.trim());
+  if (!queue.length) { status.textContent = 'אין כתוביות לתרגום.'; return; }
 
   translating = true;
   $('btn-translate-all').disabled = true;
@@ -808,35 +825,48 @@ async function translateSubtitles(subs) {
 
   const target = $('sel-target-lang').value;
   const mode = document.querySelector('input[name="translate-mode"]:checked').value;
-  let done = 0, failed = 0;
+  const total = queue.length;
+  let done = 0;
+  let pending = [...queue];
 
-  for (const sub of subs) {
-    status.textContent = `מתרגם... ${done + failed + 1} מתוך ${subs.length}`;
-    try {
-      const translated = await translateText(sub.text, target);
-      sub.text = (mode === 'append') ? sub.text + '\n' + translated : translated;
-      done++;
-      renderSubtitleList();
-      renderTimeline();
-      renderOverlay(true);
-    } catch (_) {
-      failed++;
+  // עד 3 סבבים: שורות שנכשלו (חסימת קצב, תקלת רשת) מנוסות שוב עם השהיה גדלה
+  for (let attempt = 0; attempt < 3 && pending.length; attempt++) {
+    if (attempt > 0) {
+      status.textContent = `ממתין וחוזר על ${pending.length} שורות שנכשלו (ניסיון ${attempt + 1} מתוך 3)...`;
+      await delay(2500 * attempt);
     }
-    // השהיה קצרה כדי לא להיחסם על ידי שירות התרגום
-    await new Promise(r => setTimeout(r, 250));
+    const failedThisRound = [];
+    for (const sub of pending) {
+      status.textContent = `מתרגם... ${done + 1} מתוך ${total}` + (attempt > 0 ? ` (ניסיון ${attempt + 1})` : '');
+      try {
+        const translated = await translateText(sub.text, target);
+        sub.text = (mode === 'append') ? sub.text + '\n' + translated : translated;
+        done++;
+        renderSubtitleList();
+        renderTimeline();
+        renderOverlay(true);
+      } catch (_) {
+        failedThisRound.push(sub);
+      }
+      // השהיה בין בקשות כדי לא להיחסם; גדלה בניסיונות חוזרים
+      await delay(300 + attempt * 700);
+    }
+    pending = failedThisRound;
   }
 
   translating = false;
   $('btn-translate-all').disabled = false;
   $('btn-translate-selected').disabled = false;
 
-  if (failed === subs.length) {
+  if (done === 0) {
     status.textContent = '❌ לא ניתן לגשת לשירות התרגום. בדקו חיבור לאינטרנט. ' +
       '(בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו אותו מקומית)';
-  } else if (failed > 0) {
-    status.textContent = `✅ תורגמו ${done} כתוביות, ${failed} נכשלו — נסו שוב.`;
+  } else if (pending.length > 0) {
+    const nums = pending.map(sub => state.subtitles.indexOf(sub) + 1).join(', ');
+    status.textContent = `⚠️ תורגמו ${done} מתוך ${total}. שורות שלא תורגמו: ${nums}. ` +
+      'המתינו כדקה ולחצו שוב על "תרגום כל הכתוביות" — שורות שכבר תורגמו במצב החלפה יישארו בשפת היעד.';
   } else {
-    status.textContent = `✅ תורגמו ${done} כתוביות בהצלחה.`;
+    status.textContent = `✅ תורגמו כל ${done} הכתוביות בהצלחה.`;
   }
 }
 
@@ -1135,6 +1165,34 @@ async function getTranscriber(modelKey, statusEl) {
   return transcriber;
 }
 
+// פיצול בלוק תמלול ארוך לכתוביות קצרות: לפי משפטים, ומשפטים ארוכים לפי מילים.
+// הזמן מחולק פרופורציונלית לאורך הטקסט של כל חלק.
+function splitTranscriptChunk(text, start, end) {
+  if (!text) return [];
+  const sentences = (text.match(/[^.!?…]+[.!?…]*/g) || [text]).map(s => s.trim()).filter(Boolean);
+  const parts = [];
+  for (const s of sentences) {
+    const words = s.split(/\s+/);
+    if (words.length > 14) {
+      for (let i = 0; i < words.length; i += 10) {
+        parts.push(words.slice(i, i + 10).join(' '));
+      }
+    } else {
+      parts.push(s);
+    }
+  }
+  const totalChars = parts.reduce((n, p) => n + p.length, 0) || 1;
+  const dur = Math.max(end - start, 0.3);
+  const out = [];
+  let t = start;
+  for (const p of parts) {
+    const d = dur * (p.length / totalChars);
+    out.push({ start: t, end: t + d, text: p });
+    t += d;
+  }
+  return out;
+}
+
 async function transcribeVideo() {
   if (transcribing) return;
   const status = $('transcribe-status');
@@ -1176,15 +1234,19 @@ async function transcribeVideo() {
     }
 
     let prevEnd = 0;
+    let created = 0;
     for (const c of chunks) {
       const start = c.timestamp[0] ?? prevEnd;
       const end = c.timestamp[1] ?? (start + 3);
-      state.subtitles.push({ id: state.nextId++, start, end, text: c.text.trim(), style: null });
+      for (const piece of splitTranscriptChunk(c.text.trim(), start, end)) {
+        state.subtitles.push({ id: state.nextId++, start: piece.start, end: piece.end, text: piece.text, style: null });
+        created++;
+      }
       prevEnd = end;
     }
     sortSubtitles();
     renderAll();
-    status.textContent = `✅ נוצרו ${chunks.length} כתוביות מהתמלול. אפשר לערוך אותן בטאב "כתוביות" או לתרגם בטאב "תרגום".`;
+    status.textContent = `✅ נוצרו ${created} כתוביות מהתמלול. אפשר לערוך אותן בטאב "כתוביות" או לתרגם בטאב "תרגום".`;
   } catch (err) {
     status.textContent = '❌ התמלול נכשל: ' + (err.message || err) +
       ' — ודאו חיבור לאינטרנט להורדת המודל. (בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו מקומית)';
