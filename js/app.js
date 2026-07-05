@@ -13,6 +13,9 @@ const DEFAULT_STYLE = {
   bold: false,
   italic: false,
   position: 85,          // אחוז מגובה המסך (מלמעלה)
+  maxWordsPerLine: 0,    // 0 = אוטומטי (בלי שבירת שורות)
+  highlightColor: '#ffd400',
+  highlightBold: true,
   effect: 'none',
   effectDuration: 0.4,
 };
@@ -281,6 +284,34 @@ function updateTimeUI() {
   updateTimelineCursor();
 }
 
+// ---------- שבירת שורות והדגשת מילים ----------
+// שבירת הטקסט לשורות של עד N מילים (0 = בלי שבירה)
+function wrapWords(text, maxWords) {
+  if (!maxWords || maxWords < 1) return text;
+  return text.split('\n').map(line => {
+    const words = line.split(/\s+/).filter(Boolean);
+    const rows = [];
+    for (let i = 0; i < words.length; i += maxWords) {
+      rows.push(words.slice(i, i + maxWords).join(' '));
+    }
+    return rows.join('\n');
+  }).join('\n');
+}
+
+// פירוק טקסט לקטעים רגילים ומודגשים לפי תחביר *מילה*
+function parseHighlights(text) {
+  const parts = [];
+  const re = /\*([^*\n]+)\*/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) parts.push({ text: text.slice(last, m.index), hl: false });
+    parts.push({ text: m[1], hl: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last), hl: false });
+  return parts;
+}
+
 // ---------- תצוגת כתוביות (Overlay) ----------
 let lastActiveKey = '';
 
@@ -325,21 +356,38 @@ function renderOverlay(force = false) {
       span.style.backgroundColor = hexToRgba(st.bgColor, st.bgOpacity / 100);
     }
 
+    const displayText = wrapWords(sub.text, st.maxWordsPerLine);
+    const segments = parseHighlights(displayText);
+    const hlStyle = (el) => {
+      el.style.color = st.highlightColor;
+      if (st.highlightBold) el.style.fontWeight = '700';
+    };
+
     if (st.effect === 'typewriter') {
       line.classList.add('fx-typewriter');
       line.dataset.subId = sub.id;
       line.dataset.start = sub.start;
       line.dataset.dur = st.effectDuration;
-      for (const ch of sub.text) {
-        const chSpan = document.createElement('span');
-        chSpan.className = 'tw-char';
-        chSpan.textContent = ch;
-        chSpan.style.padding = '0';
-        chSpan.style.borderRadius = '0';
-        span.appendChild(chSpan);
+      for (const seg of segments) {
+        for (const ch of seg.text) {
+          const chSpan = document.createElement('span');
+          chSpan.className = 'tw-char';
+          chSpan.textContent = ch;
+          chSpan.style.padding = '0';
+          chSpan.style.borderRadius = '0';
+          if (seg.hl && st.effect !== 'rainbow') hlStyle(chSpan);
+          span.appendChild(chSpan);
+        }
       }
     } else {
-      span.textContent = sub.text;
+      for (const seg of segments) {
+        const segSpan = document.createElement('span');
+        segSpan.textContent = seg.text;
+        segSpan.style.padding = '0';
+        segSpan.style.borderRadius = '0';
+        if (seg.hl && st.effect !== 'rainbow') hlStyle(segSpan);
+        span.appendChild(segSpan);
+      }
     }
 
     line.appendChild(span);
@@ -376,6 +424,9 @@ const styleInputs = {
   bold: $('chk-bold'),
   italic: $('chk-italic'),
   position: $('rng-position'),
+  maxWordsPerLine: $('rng-words-per-line'),
+  highlightColor: $('clr-highlight'),
+  highlightBold: $('chk-highlight-bold'),
   effect: $('sel-effect'),
   effectDuration: $('rng-effect-duration'),
 };
@@ -405,6 +456,9 @@ function syncStylePanel() {
   styleInputs.bold.checked = st.bold;
   styleInputs.italic.checked = st.italic;
   styleInputs.position.value = st.position;
+  styleInputs.maxWordsPerLine.value = st.maxWordsPerLine;
+  styleInputs.highlightColor.value = st.highlightColor;
+  styleInputs.highlightBold.checked = st.highlightBold;
   styleInputs.effect.value = st.effect;
   styleInputs.effectDuration.value = st.effectDuration;
   updateStyleLabels();
@@ -415,6 +469,8 @@ function updateStyleLabels() {
   $('outline-width-value').textContent = styleInputs.outlineWidth.value;
   $('bg-opacity-value').textContent = styleInputs.bgOpacity.value;
   $('position-value').textContent = styleInputs.position.value;
+  const wpl = Number(styleInputs.maxWordsPerLine.value);
+  $('words-per-line-value').textContent = wpl === 0 ? 'אוטומטי' : wpl;
   $('effect-duration-value').textContent = styleInputs.effectDuration.value;
 }
 
@@ -429,6 +485,9 @@ function readStyleFromPanel(target) {
   target.bold = styleInputs.bold.checked;
   target.italic = styleInputs.italic.checked;
   target.position = Number(styleInputs.position.value);
+  target.maxWordsPerLine = Number(styleInputs.maxWordsPerLine.value);
+  target.highlightColor = styleInputs.highlightColor.value;
+  target.highlightBold = styleInputs.highlightBold.checked;
   target.effect = styleInputs.effect.value;
   target.effectDuration = Number(styleInputs.effectDuration.value);
 }
@@ -565,6 +624,7 @@ function loadVideoFile(file) {
   const url = URL.createObjectURL(file);
   video.src = url;
   state.hasMedia = true;
+  state.mediaFile = file;
   $('video-placeholder').classList.add('hidden');
 }
 
@@ -627,10 +687,24 @@ function vttTime(sec) {
   return srtTime(sec).replace(',', '.');
 }
 
+// טקסט לייצוא: שבירת שורות לפי "מילים בשורה" + תגיות הדגשה
+function subtitleExportText(sub, format) {
+  const st = effectiveStyle(sub);
+  const wrapped = wrapWords(sub.text, st.maxWordsPerLine);
+  return parseHighlights(wrapped).map(seg => {
+    if (!seg.hl) return seg.text;
+    if (format === 'srt') {
+      const inner = st.highlightBold ? `<b>${seg.text}</b>` : seg.text;
+      return `<font color="${st.highlightColor}">${inner}</font>`;
+    }
+    return `<b>${seg.text}</b>`;
+  }).join('');
+}
+
 function exportSRT() {
   sortSubtitles();
   const out = state.subtitles.map((s, i) =>
-    `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${s.text}\n`
+    `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${subtitleExportText(s, 'srt')}\n`
   ).join('\n');
   downloadFile('subtitles.srt', out, 'text/plain');
 }
@@ -640,8 +714,7 @@ function exportVTT() {
   let out = 'WEBVTT\n\n';
   out += state.subtitles.map((s, i) => {
     const st = effectiveStyle(s);
-    const line = st.position <= 50 ? Math.round(st.position) : Math.round(st.position);
-    return `${i + 1}\n${vttTime(s.start)} --> ${vttTime(s.end)} line:${line}%\n${s.text}\n`;
+    return `${i + 1}\n${vttTime(s.start)} --> ${vttTime(s.end)} line:${Math.round(st.position)}%\n${subtitleExportText(s, 'vtt')}\n`;
   }).join('\n');
   downloadFile('subtitles.vtt', out, 'text/vtt');
 }
@@ -771,6 +844,135 @@ $('btn-translate-selected').addEventListener('click', () => {
   if (!sub) { $('translate-status').textContent = 'בחרו קודם כתובית בטאב "כתוביות".'; return; }
   translateSubtitles([sub]);
 });
+
+// ---------- תמלול אוטומטי (Whisper בדפדפן) ----------
+const WHISPER_MODELS = {
+  tiny: 'Xenova/whisper-tiny',
+  base: 'Xenova/whisper-base',
+  small: 'Xenova/whisper-small',
+};
+const TRANSFORMERS_URL = window.TRANSFORMERS_URL
+  || 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+
+let transformersPromise = null;
+const transcriberCache = {};
+let transcribing = false;
+
+function loadTransformersLib() {
+  if (!transformersPromise) {
+    transformersPromise = import(TRANSFORMERS_URL).catch(err => {
+      transformersPromise = null;
+      throw err;
+    });
+  }
+  return transformersPromise;
+}
+
+// חילוץ האודיו מקובץ הווידאו כ-PCM מונו ב-16kHz (הקצב ש-Whisper מצפה לו)
+async function extractAudio(file) {
+  const arrayBuf = await file.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx({ sampleRate: 16000 });
+  try {
+    const audioBuf = await ctx.decodeAudioData(arrayBuf);
+    if (audioBuf.numberOfChannels === 1) return audioBuf.getChannelData(0);
+    const ch0 = audioBuf.getChannelData(0);
+    const ch1 = audioBuf.getChannelData(1);
+    const mono = new Float32Array(ch0.length);
+    for (let i = 0; i < ch0.length; i++) mono[i] = (ch0[i] + ch1[i]) / 2;
+    return mono;
+  } finally {
+    ctx.close();
+  }
+}
+
+function setTranscribeProgress(frac) {
+  const wrap = $('transcribe-progress-wrap');
+  wrap.hidden = frac === null;
+  if (frac !== null) $('transcribe-progress').style.width = Math.round(frac * 100) + '%';
+}
+
+async function getTranscriber(modelKey, statusEl) {
+  if (transcriberCache[modelKey]) return transcriberCache[modelKey];
+  const { pipeline } = await loadTransformersLib();
+  const fileProgress = {};
+  const transcriber = await pipeline('automatic-speech-recognition', WHISPER_MODELS[modelKey], {
+    quantized: true,
+    progress_callback: (p) => {
+      if (p.status === 'progress' && p.total) {
+        fileProgress[p.file] = { loaded: p.loaded, total: p.total };
+        let loaded = 0, total = 0;
+        for (const f of Object.values(fileProgress)) { loaded += f.loaded; total += f.total; }
+        statusEl.textContent = `מוריד את מודל התמלול... ${(loaded / 1048576).toFixed(0)}MB / ${(total / 1048576).toFixed(0)}MB`;
+        setTranscribeProgress(total ? loaded / total : 0);
+      }
+    },
+  });
+  transcriberCache[modelKey] = transcriber;
+  return transcriber;
+}
+
+async function transcribeVideo() {
+  if (transcribing) return;
+  const status = $('transcribe-status');
+  if (!state.mediaFile) {
+    status.textContent = 'טענו קודם קובץ וידאו או אודיו.';
+    return;
+  }
+
+  transcribing = true;
+  $('btn-transcribe').disabled = true;
+
+  try {
+    status.textContent = 'טוען את ספריית התמלול...';
+    setTranscribeProgress(0);
+    const transcriber = await getTranscriber($('sel-whisper-model').value, status);
+
+    status.textContent = 'מחלץ אודיו מהסרטון...';
+    setTranscribeProgress(null);
+    const audio = await extractAudio(state.mediaFile);
+
+    status.textContent = 'מתמלל... (בסרטון ארוך זה עשוי לקחת כמה דקות)';
+    const lang = $('sel-speech-lang').value;
+    const result = await transcriber(audio, {
+      chunk_length_s: 30,
+      stride_length_s: 5,
+      return_timestamps: true,
+      ...(lang !== 'auto' ? { language: lang, task: 'transcribe' } : {}),
+    });
+
+    const chunks = (result.chunks || []).filter(c => (c.text || '').trim());
+    if (!chunks.length) {
+      status.textContent = 'לא זוהה דיבור בסרטון.';
+      return;
+    }
+
+    if ($('chk-clear-before-transcribe').checked) {
+      state.subtitles = [];
+      state.selectedId = null;
+    }
+
+    let prevEnd = 0;
+    for (const c of chunks) {
+      const start = c.timestamp[0] ?? prevEnd;
+      const end = c.timestamp[1] ?? (start + 3);
+      state.subtitles.push({ id: state.nextId++, start, end, text: c.text.trim(), style: null });
+      prevEnd = end;
+    }
+    sortSubtitles();
+    renderAll();
+    status.textContent = `✅ נוצרו ${chunks.length} כתוביות מהתמלול. אפשר לערוך אותן בטאב "כתוביות" או לתרגם בטאב "תרגום".`;
+  } catch (err) {
+    status.textContent = '❌ התמלול נכשל: ' + (err.message || err) +
+      ' — ודאו חיבור לאינטרנט להורדת המודל. (בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו מקומית)';
+  } finally {
+    setTranscribeProgress(null);
+    transcribing = false;
+    $('btn-transcribe').disabled = false;
+  }
+}
+
+$('btn-transcribe').addEventListener('click', transcribeVideo);
 
 // ---------- קיצורי מקלדת ----------
 document.addEventListener('keydown', (e) => {

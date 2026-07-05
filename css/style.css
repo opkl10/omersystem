@@ -372,6 +372,23 @@ body {
 .translate-actions .btn { justify-content: center; }
 .btn:disabled { opacity: 0.5; cursor: wait; }
 
+/* ===== תמלול ===== */
+.progress-bar {
+  height: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0;
+  direction: ltr;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.2s;
+}
+
 /* ===== רספונסיביות ===== */
 @media (max-width: 900px) {
   .app-layout { flex-direction: column; overflow-y: auto; }

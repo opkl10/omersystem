@@ -59,6 +59,7 @@
         <button class="tab" data-tab="style">עיצוב</button>
         <button class="tab" data-tab="fonts">פונטים</button>
         <button class="tab" data-tab="translate">תרגום</button>
+        <button class="tab" data-tab="transcribe">תמלול</button>
       </div>
 
       <!-- --- טאב כתוביות --- -->
@@ -128,6 +129,22 @@
           <label>מיקום אנכי: <span id="position-value">85</span>%</label>
           <input type="range" id="rng-position" min="5" max="95" value="85">
         </div>
+
+        <div class="form-group">
+          <label>מילים בשורה: <span id="words-per-line-value">אוטומטי</span></label>
+          <input type="range" id="rng-words-per-line" min="0" max="10" value="0">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>צבע הדגשת מילים</label>
+            <input type="color" id="clr-highlight" value="#ffd400">
+          </div>
+          <div class="form-group">
+            <label class="checkbox-row"><input type="checkbox" id="chk-highlight-bold" checked> הדגשה מודגשת</label>
+          </div>
+        </div>
+        <p class="hint">להדגשת מילה עוטפים אותה בכוכביות בטקסט הכתובית: לפני *מילה מודגשת* אחרי</p>
 
         <div class="form-group">
           <label>אפקט</label>
@@ -208,6 +225,51 @@
         </div>
         <p id="translate-status" class="hint"></p>
         <p class="hint">שפת המקור מזוהה אוטומטית. התרגום משתמש ב-Google Translate (עם גיבוי MyMemory) ודורש חיבור לאינטרנט.</p>
+      </div>
+
+      <!-- --- טאב תמלול --- -->
+      <div class="tab-content" id="tab-transcribe">
+        <p class="hint" style="margin-bottom:12px">
+          תמלול אוטומטי יוצר כתוביות מסרטון שאין בו כתוביות — זיהוי דיבור (Whisper) שרץ כולו בדפדפן.
+          בפעם הראשונה יורד מודל (חד־פעמי, נשמר בדפדפן), ולכן נדרש חיבור לאינטרנט.
+        </p>
+
+        <div class="form-group">
+          <label>איכות מודל</label>
+          <select id="sel-whisper-model">
+            <option value="tiny" selected>מהיר — הורדה ~40MB, דיוק בסיסי</option>
+            <option value="base">מאוזן — הורדה ~80MB</option>
+            <option value="small">איכותי — הורדה ~250MB, איטי יותר</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>שפת הדיבור בסרטון</label>
+          <select id="sel-speech-lang">
+            <option value="auto" selected>זיהוי אוטומטי</option>
+            <option value="he">עברית</option>
+            <option value="en">אנגלית</option>
+            <option value="ar">ערבית</option>
+            <option value="ru">רוסית</option>
+            <option value="fr">צרפתית</option>
+            <option value="es">ספרדית</option>
+            <option value="de">גרמנית</option>
+          </select>
+        </div>
+
+        <label class="checkbox-row" style="margin-bottom:12px">
+          <input type="checkbox" id="chk-clear-before-transcribe" checked>
+          מחיקת הכתוביות הקיימות לפני התמלול
+        </label>
+
+        <div class="translate-actions">
+          <button id="btn-transcribe" class="btn btn-primary">🎙️ תמלול אוטומטי של הסרטון</button>
+        </div>
+        <div class="progress-bar" id="transcribe-progress-wrap" hidden>
+          <div class="progress-fill" id="transcribe-progress"></div>
+        </div>
+        <p id="transcribe-status" class="hint"></p>
+        <p class="hint">אחרי התמלול אפשר לעבור לטאב "תרגום" ולתרגם את התוצאה לכל שפה.</p>
       </div>
     </aside>
   </main>
