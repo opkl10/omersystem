@@ -389,6 +389,18 @@ body {
   transition: width 0.2s;
 }
 
+/* ===== ייצוא וידאו ===== */
+.export-video-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+
 /* ===== רספונסיביות ===== */
 @media (max-width: 900px) {
   .app-layout { flex-direction: column; overflow-y: auto; }

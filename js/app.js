@@ -243,6 +243,7 @@ function currentTime() {
 }
 
 function seekTo(t) {
+  if (exportingVideo) return;
   t = Math.max(0, Math.min(t, timelineDuration()));
   if (state.hasMedia) video.currentTime = t;
   else clockTime = t;
@@ -251,6 +252,7 @@ function seekTo(t) {
 }
 
 function togglePlay() {
+  if (exportingVideo) return;
   if (state.hasMedia) {
     if (video.paused) video.play(); else video.pause();
   } else {
@@ -845,6 +847,227 @@ $('btn-translate-selected').addEventListener('click', () => {
   translateSubtitles([sub]);
 });
 
+// ---------- ייצוא וידאו עם כתוביות צרובות ----------
+let exportingVideo = false;
+let exportRecorder = null;
+let exportAudioCtx = null;
+let exportSourceNode = null;
+
+// ציור הכתוביות הפעילות על קנבס בזמן t, בסגנון ובאפקטים של התצוגה המקדימה
+function drawSubtitlesOnCanvas(ctx, W, H, t, scale) {
+  const active = state.subtitles.filter(s => t >= s.start && t < s.end);
+  for (const sub of active) {
+    const st = effectiveStyle(sub);
+    const dur = Math.max(st.effectDuration, 0.05);
+    const p = Math.min(Math.max((t - sub.start) / dur, 0), 1);
+    const et = t - sub.start;
+
+    let alpha = 1, offX = 0, offY = 0, zoom = 1, shadowBlur = 0, colorOverride = null, visFrac = 1;
+    switch (st.effect) {
+      case 'fade': alpha = p; break;
+      case 'slide-up': alpha = p; offY = (1 - p) * 40 * scale; break;
+      case 'slide-down': alpha = p; offY = -(1 - p) * 40 * scale; break;
+      case 'zoom': alpha = p; zoom = 0.3 + 0.7 * p; break;
+      case 'bounce':
+        alpha = Math.min(p / 0.6, 1);
+        if (p < 0.6) offY = (1 - p / 0.6) * 60 * scale;
+        else if (p < 0.8) offY = -12 * ((p - 0.6) / 0.2) * scale * (1 - (p - 0.6) / 0.2) * 4;
+        else offY = 5 * (1 - (p - 0.8) / 0.2) * scale;
+        break;
+      case 'typewriter': visFrac = p; break;
+      case 'glow': shadowBlur = 18 * scale; break;
+      case 'pulse': zoom = 1 + 0.06 * Math.sin(et * 2 * Math.PI / 1.2); break;
+      case 'shake': offX = 6 * scale * Math.sin(et * 2 * Math.PI / 0.35); break;
+      case 'rainbow': colorOverride = `hsl(${Math.round(et * 140) % 360}, 90%, 65%)`; break;
+    }
+
+    const fontPx = st.fontSize * scale;
+    const lineH = fontPx * 1.35;
+    const wrapped = wrapWords(sub.text, st.maxWordsPerLine);
+    const lines = wrapped.split('\n').map(parseHighlights);
+    const rtl = /[֐-ࣿ]/.test(wrapped);
+
+    let charBudget = Infinity;
+    if (st.effect === 'typewriter') {
+      const totalChars = lines.flat().reduce((n, s) => n + s.text.length, 0);
+      charBudget = Math.ceil(visFrac * totalChars);
+    }
+
+    const centerX = W / 2 + offX;
+    const centerY = st.position / 100 * H + offY;
+    const totalH = lines.length * lineH;
+
+    const segFont = (hl) => `${st.italic ? 'italic ' : ''}${(st.bold || (hl && st.highlightBold)) ? '700' : '400'} ${fontPx}px "${st.fontFamily}", sans-serif`;
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (zoom !== 1) {
+      ctx.translate(centerX, centerY);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-centerX, -centerY);
+    }
+    ctx.textBaseline = 'middle';
+
+    lines.forEach((segs, li) => {
+      const y = centerY - totalH / 2 + lineH * (li + 0.5);
+
+      // פירוק למילים עם רווחים מפורשים — כך רוחב הרווח לא תלוי בכיווניות הטקסט
+      const tokens = [];
+      for (const seg of segs) {
+        for (const w of seg.text.split(/\s+/)) {
+          if (w) tokens.push({ w, hl: seg.hl });
+        }
+      }
+      if (!tokens.length) return;
+
+      ctx.font = segFont(false);
+      const spaceW = ctx.measureText(' ').width;
+      const widths = tokens.map(tok => {
+        ctx.font = segFont(tok.hl);
+        return ctx.measureText(tok.w).width;
+      });
+      const lineW = widths.reduce((a, b) => a + b, 0) + spaceW * (tokens.length - 1);
+
+      if (st.bgOpacity > 0) {
+        ctx.save();
+        ctx.globalAlpha = alpha * st.bgOpacity / 100;
+        ctx.fillStyle = st.bgColor;
+        ctx.fillRect(centerX - lineW / 2 - fontPx * 0.3, y - lineH / 2, lineW + fontPx * 0.6, lineH);
+        ctx.restore();
+      }
+
+      // ב-RTL המילה הלוגית הראשונה מצוירת מימין; ב-LTR משמאל
+      let x = rtl ? centerX + lineW / 2 : centerX - lineW / 2;
+      ctx.textAlign = rtl ? 'right' : 'left';
+
+      tokens.forEach((tok, ti) => {
+        let drawText = tok.w;
+        if (charBudget !== Infinity) {
+          drawText = charBudget <= 0 ? '' : tok.w.slice(0, charBudget);
+          charBudget -= tok.w.length + 1; // כולל הרווח שאחרי המילה
+        }
+        if (drawText) {
+          ctx.font = segFont(tok.hl);
+          const color = tok.hl ? st.highlightColor : (colorOverride || st.textColor);
+          if (shadowBlur > 0) {
+            ctx.shadowColor = color;
+            ctx.shadowBlur = shadowBlur;
+          }
+          if (st.outlineWidth > 0) {
+            ctx.strokeStyle = st.outlineColor;
+            ctx.lineWidth = st.outlineWidth * 2 * scale;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(drawText, x, y);
+          }
+          ctx.fillStyle = color;
+          ctx.fillText(drawText, x, y);
+          ctx.shadowBlur = 0;
+        }
+        x += (rtl ? -1 : 1) * (widths[ti] + spaceW);
+      });
+    });
+    ctx.restore();
+  }
+}
+
+async function exportVideoWithSubtitles() {
+  if (exportingVideo) return;
+  if (!state.hasMedia || !video.videoWidth) {
+    alert('טענו קודם קובץ וידאו (לא רק אודיו) כדי לייצא אותו עם כתוביות.');
+    return;
+  }
+
+  exportingVideo = true;
+  $('btn-export-video').disabled = true;
+  $('export-video-bar').hidden = false;
+  $('export-video-progress').style.width = '0%';
+
+  const W = video.videoWidth, H = video.videoHeight;
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  // יחס בין רזולוציית הווידאו לגובה התצוגה המקדימה — כדי שגודל הטקסט יתאים למה שרואים
+  const scale = H / (overlay.clientHeight || 540);
+
+  const stream = canvas.captureStream(30);
+  try {
+    if (!exportAudioCtx) {
+      exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      exportSourceNode = exportAudioCtx.createMediaElementSource(video);
+      exportSourceNode.connect(exportAudioCtx.destination);
+    }
+    await exportAudioCtx.resume();
+    const dest = exportAudioCtx.createMediaStreamDestination();
+    exportSourceNode.connect(dest);
+    const audioTrack = dest.stream.getAudioTracks()[0];
+    if (audioTrack) stream.addTrack(audioTrack);
+  } catch (_) { /* ממשיכים בלי אודיו */ }
+
+  const mime = [
+    'video/mp4;codecs=avc1,mp4a.40.2', 'video/mp4',
+    'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm',
+  ].find(m => MediaRecorder.isTypeSupported(m)) || '';
+  const ext = mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+
+  const chunks = [];
+  exportRecorder = new MediaRecorder(stream, {
+    ...(mime ? { mimeType: mime } : {}),
+    videoBitsPerSecond: 8_000_000,
+  });
+  exportRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+
+  let cancelled = false;
+  exportRecorder.onstop = () => {
+    if (!cancelled && chunks.length) {
+      const blob = new Blob(chunks, { type: mime || 'video/webm' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'video-with-subtitles.' + ext;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }
+    exportingVideo = false;
+    exportRecorder = null;
+    $('btn-export-video').disabled = false;
+    $('export-video-bar').hidden = true;
+    video.pause();
+    updatePlayButton();
+  };
+
+  $('btn-cancel-export').onclick = () => {
+    cancelled = true;
+    if (exportRecorder && exportRecorder.state !== 'inactive') exportRecorder.stop();
+  };
+
+  // חזרה לתחילת הסרטון והקלטה בזמן אמת
+  video.pause();
+  video.currentTime = 0;
+  await new Promise(r => {
+    if (video.currentTime === 0 && video.readyState >= 2) r();
+    else video.addEventListener('seeked', r, { once: true });
+  });
+
+  exportRecorder.start(1000);
+  await video.play();
+  updatePlayButton();
+
+  const drawLoop = () => {
+    if (!exportingVideo || !exportRecorder) return;
+    ctx.drawImage(video, 0, 0, W, H);
+    drawSubtitlesOnCanvas(ctx, W, H, video.currentTime, scale);
+    $('export-video-progress').style.width = (video.currentTime / video.duration * 100) + '%';
+    if (video.ended) {
+      if (exportRecorder.state !== 'inactive') exportRecorder.stop();
+      return;
+    }
+    requestAnimationFrame(drawLoop);
+  };
+  drawLoop();
+}
+
+$('btn-export-video').addEventListener('click', exportVideoWithSubtitles);
+
 // ---------- תמלול אוטומטי (Whisper בדפדפן) ----------
 const WHISPER_MODELS = {
   tiny: 'Xenova/whisper-tiny',
@@ -852,7 +1075,7 @@ const WHISPER_MODELS = {
   small: 'Xenova/whisper-small',
 };
 const TRANSFORMERS_URL = window.TRANSFORMERS_URL
-  || 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+  || 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js';
 
 let transformersPromise = null;
 const transcriberCache = {};
