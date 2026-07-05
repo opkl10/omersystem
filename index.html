@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>מערכת כתוביות — עורך כתוביות מתקדם</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>🎬 מערכת כתוביות</h1>
+    <div class="header-actions">
+      <button id="btn-import-project" class="btn">📂 טעינת פרויקט</button>
+      <button id="btn-save-project" class="btn">💾 שמירת פרויקט</button>
+      <button id="btn-export-srt" class="btn btn-primary">⬇️ ייצוא SRT</button>
+      <button id="btn-export-vtt" class="btn btn-primary">⬇️ ייצוא VTT</button>
+      <input type="file" id="input-import-project" accept=".json" hidden>
+    </div>
+  </header>
+
+  <main class="app-layout">
+    <!-- ===== אזור וידאו ותצוגה מקדימה ===== -->
+    <section class="video-panel">
+      <div class="video-container" id="video-container">
+        <video id="video" playsinline></video>
+        <div class="video-placeholder" id="video-placeholder">
+          <p>🎥 לא נטען וידאו</p>
+          <label class="btn btn-primary">
+            בחירת קובץ וידאו
+            <input type="file" id="input-video" accept="video/*,audio/*" hidden>
+          </label>
+          <p class="hint">אפשר גם לעבוד בלי וידאו — התצוגה המקדימה תעבוד על רקע שחור</p>
+        </div>
+        <div class="subtitle-overlay" id="subtitle-overlay"></div>
+      </div>
+
+      <div class="video-controls">
+        <button id="btn-play" class="btn btn-icon" title="נגן / השהה">▶️</button>
+        <span id="time-display" class="time-display">00:00.000</span>
+        <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1">
+        <span id="duration-display" class="time-display">00:00.000</span>
+        <label class="btn btn-icon" title="החלפת וידאו">
+          🎥<input type="file" id="input-video-2" accept="video/*,audio/*" hidden>
+        </label>
+      </div>
+
+      <!-- ===== ציר זמן ===== -->
+      <div class="timeline-wrapper">
+        <div class="timeline" id="timeline">
+          <div class="timeline-cursor" id="timeline-cursor"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== פאנל עריכה ===== -->
+    <aside class="edit-panel">
+      <div class="tabs">
+        <button class="tab active" data-tab="subtitles">כתוביות</button>
+        <button class="tab" data-tab="style">עיצוב</button>
+        <button class="tab" data-tab="fonts">פונטים</button>
+      </div>
+
+      <!-- --- טאב כתוביות --- -->
+      <div class="tab-content active" id="tab-subtitles">
+        <div class="subtitle-toolbar">
+          <button id="btn-add-subtitle" class="btn btn-primary">➕ כתובית חדשה</button>
+          <button id="btn-add-at-time" class="btn">⏱️ הוספה בזמן הנוכחי</button>
+        </div>
+        <div class="subtitle-list" id="subtitle-list"></div>
+      </div>
+
+      <!-- --- טאב עיצוב --- -->
+      <div class="tab-content" id="tab-style">
+        <p class="style-target-note" id="style-target-note">עיצוב גלובלי (חל על כל הכתוביות)</p>
+        <label class="checkbox-row" id="override-row" hidden>
+          <input type="checkbox" id="chk-override">
+          עיצוב מותאם אישית לכתובית שנבחרה
+        </label>
+
+        <div class="form-group">
+          <label>פונט</label>
+          <select id="sel-font"></select>
+        </div>
+
+        <div class="form-group">
+          <label>גודל פונט: <span id="font-size-value">32</span>px</label>
+          <input type="range" id="rng-font-size" min="10" max="120" value="32">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>צבע טקסט</label>
+            <input type="color" id="clr-text" value="#ffffff">
+          </div>
+          <div class="form-group">
+            <label>צבע מתאר</label>
+            <input type="color" id="clr-outline" value="#000000">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>עובי מתאר: <span id="outline-width-value">2</span>px</label>
+          <input type="range" id="rng-outline" min="0" max="10" value="2">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>צבע רקע</label>
+            <input type="color" id="clr-bg" value="#000000">
+          </div>
+          <div class="form-group">
+            <label>שקיפות רקע: <span id="bg-opacity-value">0</span>%</label>
+            <input type="range" id="rng-bg-opacity" min="0" max="100" value="0">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="checkbox-row"><input type="checkbox" id="chk-bold"> מודגש</label>
+          </div>
+          <div class="form-group">
+            <label class="checkbox-row"><input type="checkbox" id="chk-italic"> נטוי</label>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>מיקום אנכי: <span id="position-value">85</span>%</label>
+          <input type="range" id="rng-position" min="5" max="95" value="85">
+        </div>
+
+        <div class="form-group">
+          <label>אפקט</label>
+          <select id="sel-effect">
+            <option value="none">ללא</option>
+            <option value="fade">עמעום (Fade)</option>
+            <option value="typewriter">מכונת כתיבה</option>
+            <option value="slide-up">החלקה מלמטה</option>
+            <option value="slide-down">החלקה מלמעלה</option>
+            <option value="zoom">זום פנימה</option>
+            <option value="bounce">קפיצה</option>
+            <option value="glow">זוהר</option>
+            <option value="pulse">פעימה</option>
+            <option value="shake">רעידה</option>
+            <option value="rainbow">קשת צבעים</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>משך אפקט כניסה: <span id="effect-duration-value">0.4</span>s</label>
+          <input type="range" id="rng-effect-duration" min="0.1" max="2" step="0.1" value="0.4">
+        </div>
+      </div>
+
+      <!-- --- טאב פונטים --- -->
+      <div class="tab-content" id="tab-fonts">
+        <label class="btn btn-primary upload-font-btn">
+          ⬆️ העלאת קובץ פונט (TTF / OTF / WOFF / WOFF2)
+          <input type="file" id="input-font" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
+        </label>
+        <p class="hint">פונטים שהועלו נשמרים בתוך קובץ הפרויקט (JSON) וייטענו איתו מחדש.</p>
+        <h3>פונטים מובנים</h3>
+        <ul class="font-list" id="builtin-font-list"></ul>
+        <h3>פונטים שהועלו</h3>
+        <ul class="font-list" id="custom-font-list">
+          <li class="empty-note">לא הועלו פונטים עדיין</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

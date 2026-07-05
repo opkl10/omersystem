@@ -1,0 +1,371 @@
+/* ===== מערכת כתוביות — עיצוב ===== */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #14151a;
+  --panel: #1e2028;
+  --panel-2: #262933;
+  --border: #363a47;
+  --text: #e8eaf0;
+  --text-dim: #9aa0b0;
+  --accent: #4f7cff;
+  --accent-hover: #6b91ff;
+  --danger: #e05555;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", "Arial Hebrew", Arial, sans-serif;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ===== כותרת ===== */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.app-header h1 { font-size: 1.1rem; }
+.header-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ===== כפתורים ===== */
+.btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn:hover { background: var(--border); }
+.btn-primary { background: var(--accent); border-color: var(--accent); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-icon { padding: 6px 10px; font-size: 1rem; }
+.btn-danger { color: var(--danger); }
+
+/* ===== פריסה ראשית ===== */
+.app-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ===== פאנל וידאו ===== */
+.video-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.video-container {
+  position: relative;
+  flex: 1;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 200px;
+}
+.video-container video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.video-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-dim);
+  z-index: 2;
+}
+.video-placeholder.hidden { display: none; }
+.hint { font-size: 0.75rem; color: var(--text-dim); }
+
+/* ===== שכבת כתוביות ===== */
+.subtitle-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  overflow: hidden;
+}
+.subtitle-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  transform: translateY(-50%);
+  padding: 0 40px;
+  white-space: pre-wrap;
+  line-height: 1.35;
+}
+.subtitle-line > span {
+  display: inline-block;
+  padding: 2px 12px;
+  border-radius: 6px;
+}
+
+/* ===== אפקטים ===== */
+@keyframes sub-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sub-slide-up { from { opacity: 0; transform: translateY(calc(-50% + 40px)); } to { opacity: 1; transform: translateY(-50%); } }
+@keyframes sub-slide-down { from { opacity: 0; transform: translateY(calc(-50% - 40px)); } to { opacity: 1; transform: translateY(-50%); } }
+@keyframes sub-zoom { from { opacity: 0; transform: translateY(-50%) scale(0.3); } to { opacity: 1; transform: translateY(-50%) scale(1); } }
+@keyframes sub-bounce {
+  0% { opacity: 0; transform: translateY(calc(-50% + 60px)); }
+  60% { opacity: 1; transform: translateY(calc(-50% - 12px)); }
+  80% { transform: translateY(calc(-50% + 5px)); }
+  100% { opacity: 1; transform: translateY(-50%); }
+}
+@keyframes sub-pulse {
+  0%, 100% { transform: translateY(-50%) scale(1); }
+  50% { transform: translateY(-50%) scale(1.06); }
+}
+@keyframes sub-shake {
+  0%, 100% { margin-left: 0; }
+  25% { margin-left: -6px; }
+  75% { margin-left: 6px; }
+}
+@keyframes sub-rainbow {
+  0% { color: #ff5555; } 20% { color: #ffb86c; } 40% { color: #f1fa8c; }
+  60% { color: #50fa7b; } 80% { color: #8be9fd; } 100% { color: #ff79c6; }
+}
+
+.fx-fade { animation: sub-fade var(--fx-dur, 0.4s) ease both; }
+.fx-slide-up { animation: sub-slide-up var(--fx-dur, 0.4s) ease both; }
+.fx-slide-down { animation: sub-slide-down var(--fx-dur, 0.4s) ease both; }
+.fx-zoom { animation: sub-zoom var(--fx-dur, 0.4s) ease both; }
+.fx-bounce { animation: sub-bounce var(--fx-dur, 0.5s) ease both; }
+.fx-pulse { animation: sub-pulse 1.2s ease-in-out infinite; }
+.fx-shake { animation: sub-shake 0.35s linear infinite; }
+.fx-rainbow { animation: sub-rainbow 2.5s linear infinite alternate; }
+.fx-glow > span { text-shadow: 0 0 8px currentColor, 0 0 20px currentColor, 0 0 35px currentColor !important; }
+.fx-typewriter .tw-hidden { visibility: hidden; }
+
+/* ===== בקרות וידאו ===== */
+.video-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  direction: ltr;
+}
+.video-controls input[type="range"] { flex: 1; accent-color: var(--accent); }
+.time-display {
+  font-family: monospace;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  min-width: 72px;
+  text-align: center;
+}
+
+/* ===== ציר זמן ===== */
+.timeline-wrapper {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  direction: ltr;
+}
+.timeline {
+  position: relative;
+  height: 56px;
+  background: var(--panel-2);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.timeline-block {
+  position: absolute;
+  top: 10px;
+  height: 36px;
+  background: rgba(79, 124, 255, 0.45);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 0.65rem;
+  color: #fff;
+  overflow: hidden;
+  white-space: nowrap;
+  padding: 2px 4px;
+  cursor: pointer;
+  direction: rtl;
+}
+.timeline-block.selected { background: rgba(79, 124, 255, 0.85); box-shadow: 0 0 0 2px #fff3; }
+.timeline-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #ff5555;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* ===== פאנל עריכה ===== */
+.edit-panel {
+  width: 360px;
+  background: var(--panel);
+  border-inline-start: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tabs { display: flex; border-bottom: 1px solid var(--border); }
+.tab {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 10px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  border-bottom: 2px solid transparent;
+}
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-content { display: none; padding: 14px; overflow-y: auto; flex: 1; }
+.tab-content.active { display: block; }
+
+/* ===== רשימת כתוביות ===== */
+.subtitle-toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.subtitle-list { display: flex; flex-direction: column; gap: 8px; }
+.subtitle-item {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+}
+.subtitle-item.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.subtitle-item-times {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+  direction: ltr;
+  justify-content: flex-end;
+}
+.subtitle-item-times input {
+  width: 92px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 3px 5px;
+  font-family: monospace;
+  font-size: 0.75rem;
+  text-align: center;
+}
+.subtitle-item textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 6px;
+  resize: vertical;
+  min-height: 44px;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+.subtitle-item-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  align-items: center;
+}
+.subtitle-item-actions .spacer { flex: 1; }
+.mini-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+.mini-btn:hover { color: var(--text); background: var(--border); }
+.custom-style-badge { font-size: 0.65rem; color: var(--accent); }
+
+/* ===== טפסים ===== */
+.form-group { margin-bottom: 14px; }
+.form-group label { display: block; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 5px; }
+.form-row { display: flex; gap: 12px; }
+.form-row .form-group { flex: 1; }
+.form-group select,
+.form-group input[type="text"] {
+  width: 100%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 7px;
+}
+.form-group input[type="range"] { width: 100%; accent-color: var(--accent); }
+.form-group input[type="color"] {
+  width: 100%;
+  height: 34px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 2px;
+}
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  color: var(--text) !important;
+  font-size: 0.85rem !important;
+}
+.style-target-note {
+  font-size: 0.78rem;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+
+/* ===== פונטים ===== */
+.upload-font-btn { width: 100%; justify-content: center; margin-bottom: 10px; }
+.tab-content h3 { font-size: 0.85rem; color: var(--text-dim); margin: 14px 0 8px; }
+.font-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.font-list li {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.font-list .empty-note { color: var(--text-dim); font-size: 0.8rem; border-style: dashed; }
+
+/* ===== רספונסיביות ===== */
+@media (max-width: 900px) {
+  .app-layout { flex-direction: column; overflow-y: auto; }
+  body { overflow-y: auto; }
+  .edit-panel { width: 100%; border-inline-start: none; border-top: 1px solid var(--border); }
+  .video-container { min-height: 240px; flex: none; height: 40vh; }
+}
