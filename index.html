@@ -15,15 +15,15 @@
       <button id="btn-export-srt" class="btn btn-primary">⬇️ ייצוא SRT</button>
       <button id="btn-export-vtt" class="btn btn-primary">⬇️ ייצוא VTT</button>
       <button id="btn-export-video" class="btn btn-primary">🎞️ הורדת הסרטון עם הכתוביות</button>
-      <input type="file" id="input-import-project" accept=".json" hidden>
+      <input type="file" id="input-import-project" accept=".json" hidden aria-label="בחירת קובץ פרויקט לטעינה">
     </div>
   </header>
 
   <main class="app-layout">
     <!-- ===== אזור וידאו ותצוגה מקדימה ===== -->
-    <section class="video-panel">
+    <section class="video-panel" aria-label="נגן וידאו ותצוגה מקדימה">
       <div class="video-container" id="video-container">
-        <video id="video" playsinline></video>
+        <video id="video" playsinline aria-label="תצוגה מקדימה של הסרטון עם הכתוביות"></video>
         <div class="video-placeholder" id="video-placeholder">
           <p>🎥 לא נטען וידאו</p>
           <label class="btn btn-primary">
@@ -36,19 +36,19 @@
       </div>
 
       <div class="video-controls">
-        <button id="btn-play" class="btn btn-icon" title="נגן / השהה">▶️</button>
-        <span id="time-display" class="time-display">00:00.000</span>
-        <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1">
-        <span id="duration-display" class="time-display">00:00.000</span>
-        <label class="btn btn-icon" title="החלפת וידאו">
+        <button id="btn-play" class="btn btn-icon" title="נגן / השהה" aria-label="נגן או השהה">▶️</button>
+        <span id="time-display" class="time-display" aria-hidden="true">00:00.000</span>
+        <input type="range" id="seek-bar" min="0" max="1000" value="0" step="1" aria-label="מיקום הניגון בסרטון">
+        <span id="duration-display" class="time-display" aria-hidden="true">00:00.000</span>
+        <label class="btn btn-icon" title="החלפת וידאו" aria-label="החלפת קובץ הווידאו">
           🎥<input type="file" id="input-video-2" accept="video/*,audio/*" hidden>
         </label>
       </div>
 
       <!-- ===== ייצוא וידאו ===== -->
       <div class="export-video-bar" id="export-video-bar" hidden>
-        <span id="export-video-status">מייצא וידאו עם כתוביות... אל תסגרו את הטאב</span>
-        <div class="progress-bar" style="flex:1;margin:0">
+        <span id="export-video-status" role="status">מייצא וידאו עם כתוביות... אל תסגרו את הטאב</span>
+        <div class="progress-bar" style="flex:1;margin:0" role="progressbar" aria-label="התקדמות ייצוא הווידאו">
           <div class="progress-fill" id="export-video-progress"></div>
         </div>
         <button id="btn-cancel-export" class="btn btn-danger">ביטול</button>
@@ -56,75 +56,76 @@
 
       <!-- ===== ציר זמן ===== -->
       <div class="timeline-wrapper">
-        <div class="timeline" id="timeline">
-          <canvas id="waveform-canvas" class="waveform-canvas"></canvas>
+        <div class="timeline" id="timeline" aria-label="ציר זמן של הכתוביות — לחיצה מדלגת לנקודה, גרירת בלוקים משנה תזמון">
+          <canvas id="waveform-canvas" class="waveform-canvas" aria-hidden="true"></canvas>
           <div class="timeline-cursor" id="timeline-cursor"></div>
         </div>
       </div>
     </section>
 
     <!-- ===== פאנל עריכה ===== -->
-    <aside class="edit-panel">
-      <div class="tabs">
-        <button class="tab active" data-tab="subtitles">כתוביות</button>
-        <button class="tab" data-tab="style">עיצוב</button>
-        <button class="tab" data-tab="fonts">פונטים</button>
-        <button class="tab" data-tab="translate">תרגום</button>
-        <button class="tab" data-tab="transcribe">תמלול</button>
-        <button class="tab" data-tab="cuts">חיתוך</button>
-        <button class="tab" data-tab="dub">דיבוב</button>
+    <aside class="edit-panel" aria-label="פאנל עריכת כתוביות">
+      <div class="tabs" role="tablist" aria-label="קטגוריות עריכה">
+        <button class="tab active" data-tab="subtitles" role="tab" id="tab-btn-subtitles" aria-controls="tab-subtitles" aria-selected="true">כתוביות</button>
+        <button class="tab" data-tab="style" role="tab" id="tab-btn-style" aria-controls="tab-style" aria-selected="false">עיצוב</button>
+        <button class="tab" data-tab="fonts" role="tab" id="tab-btn-fonts" aria-controls="tab-fonts" aria-selected="false">פונטים</button>
+        <button class="tab" data-tab="translate" role="tab" id="tab-btn-translate" aria-controls="tab-translate" aria-selected="false">תרגום</button>
+        <button class="tab" data-tab="transcribe" role="tab" id="tab-btn-transcribe" aria-controls="tab-transcribe" aria-selected="false">תמלול</button>
+        <button class="tab" data-tab="cuts" role="tab" id="tab-btn-cuts" aria-controls="tab-cuts" aria-selected="false">חיתוך</button>
       </div>
 
       <!-- --- טאב כתוביות --- -->
-      <div class="tab-content active" id="tab-subtitles">
+      <div class="tab-content active" id="tab-subtitles" role="tabpanel" aria-labelledby="tab-btn-subtitles" tabindex="0">
         <div class="subtitle-toolbar">
           <button id="btn-add-subtitle" class="btn btn-primary">➕ כתובית חדשה</button>
           <button id="btn-add-at-time" class="btn">⏱️ הוספה בזמן הנוכחי</button>
+          <button id="btn-fix-overlaps" class="btn" title="קיצור כתוביות שנמשכות לתוך הכתובית הבאה">🧹 תיקון חפיפות</button>
         </div>
+        <p id="subtitles-status" class="hint" role="status" aria-live="polite"></p>
         <div class="subtitle-list" id="subtitle-list"></div>
       </div>
 
       <!-- --- טאב עיצוב --- -->
-      <div class="tab-content" id="tab-style">
-        <p class="style-target-note" id="style-target-note">עיצוב גלובלי (חל על כל הכתוביות)</p>
+      <div class="tab-content" id="tab-style" role="tabpanel" aria-labelledby="tab-btn-style" tabindex="0">
+        <p class="style-target-note" id="style-target-note" role="status">עיצוב גלובלי (חל על כל הכתוביות)</p>
         <label class="checkbox-row" id="override-row" hidden>
           <input type="checkbox" id="chk-override">
           עיצוב מותאם אישית לכתובית שנבחרה
         </label>
 
         <div class="form-group">
-          <label>פונט</label>
+          <label for="sel-font">פונט</label>
           <select id="sel-font"></select>
         </div>
 
         <div class="form-group">
-          <label>גודל פונט: <span id="font-size-value">32</span>px</label>
+          <label for="rng-font-size">גודל פונט: <span id="font-size-value">32</span>px</label>
           <input type="range" id="rng-font-size" min="10" max="120" value="32">
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>צבע טקסט</label>
+            <label for="clr-text">צבע טקסט</label>
             <input type="color" id="clr-text" value="#ffffff">
           </div>
           <div class="form-group">
-            <label>צבע מתאר</label>
+            <label for="clr-outline">צבע מתאר</label>
             <input type="color" id="clr-outline" value="#000000">
           </div>
         </div>
 
         <div class="form-group">
-          <label>עובי מתאר: <span id="outline-width-value">2</span>px</label>
+          <label for="rng-outline">עובי מתאר: <span id="outline-width-value">2</span>px</label>
           <input type="range" id="rng-outline" min="0" max="10" value="2">
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>צבע רקע</label>
+            <label for="clr-bg">צבע רקע</label>
             <input type="color" id="clr-bg" value="#000000">
           </div>
           <div class="form-group">
-            <label>שקיפות רקע: <span id="bg-opacity-value">0</span>%</label>
+            <label for="rng-bg-opacity">שקיפות רקע: <span id="bg-opacity-value">0</span>%</label>
             <input type="range" id="rng-bg-opacity" min="0" max="100" value="0">
           </div>
         </div>
@@ -139,24 +140,24 @@
         </div>
 
         <div class="form-group">
-          <label>מיקום אנכי: <span id="position-value">85</span>%</label>
+          <label for="rng-position">מיקום אנכי: <span id="position-value">85</span>%</label>
           <input type="range" id="rng-position" min="5" max="95" value="85">
         </div>
 
         <div class="form-group">
-          <label>מילים בשורה: <span id="words-per-line-value">אוטומטי</span></label>
+          <label for="rng-words-per-line">מילים בשורה: <span id="words-per-line-value">אוטומטי</span></label>
           <input type="range" id="rng-words-per-line" min="0" max="10" value="0">
         </div>
 
         <div class="form-group">
-          <label>שורות בכל פעם: <span id="max-lines-value">בלי הגבלה</span></label>
+          <label for="rng-max-lines">שורות בכל פעם: <span id="max-lines-value">בלי הגבלה</span></label>
           <input type="range" id="rng-max-lines" min="0" max="4" value="0">
           <p class="hint">כשכתובית ארוכה מדי, היא תתחלף בדפים של עד N שורות לאורך זמן ההצגה שלה</p>
         </div>
 
         <div class="form-row">
           <div class="form-group">
-            <label>צבע הדגשת מילים</label>
+            <label for="clr-highlight">צבע הדגשת מילים</label>
             <input type="color" id="clr-highlight" value="#ffd400">
           </div>
           <div class="form-group">
@@ -166,7 +167,7 @@
         <p class="hint">להדגשת מילה עוטפים אותה בכוכביות בטקסט הכתובית: לפני *מילה מודגשת* אחרי</p>
 
         <div class="form-group">
-          <label>אפקט</label>
+          <label for="sel-effect">אפקט</label>
           <select id="sel-effect">
             <option value="none">ללא</option>
             <option value="fade">עמעום (Fade)</option>
@@ -184,13 +185,13 @@
         </div>
 
         <div class="form-group">
-          <label>משך אפקט כניסה: <span id="effect-duration-value">0.4</span>s</label>
+          <label for="rng-effect-duration">משך אפקט כניסה: <span id="effect-duration-value">0.4</span>s</label>
           <input type="range" id="rng-effect-duration" min="0.1" max="2" step="0.1" value="0.4">
         </div>
       </div>
 
       <!-- --- טאב פונטים --- -->
-      <div class="tab-content" id="tab-fonts">
+      <div class="tab-content" id="tab-fonts" role="tabpanel" aria-labelledby="tab-btn-fonts" tabindex="0">
         <label class="btn btn-primary upload-font-btn">
           ⬆️ העלאת קובץ פונט (TTF / OTF / WOFF / WOFF2)
           <input type="file" id="input-font" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
@@ -205,9 +206,9 @@
       </div>
 
       <!-- --- טאב תרגום --- -->
-      <div class="tab-content" id="tab-translate">
+      <div class="tab-content" id="tab-translate" role="tabpanel" aria-labelledby="tab-btn-translate" tabindex="0">
         <div class="form-group">
-          <label>מנוע תרגום</label>
+          <label for="sel-translate-engine">מנוע תרגום</label>
           <select id="sel-translate-engine">
             <option value="free" selected>חינמי (Google Translate + MyMemory)</option>
             <option value="gemini">Gemini — איכותי יותר, דורש מפתח API חינמי</option>
@@ -215,14 +216,14 @@
         </div>
 
         <div class="form-group" id="gemini-key-group" hidden>
-          <label>מפתח API של Gemini</label>
+          <label for="input-gemini-key">מפתח API של Gemini</label>
           <input type="password" id="input-gemini-key" placeholder="AIza..." autocomplete="off">
           <p class="hint">המפתח נשמר רק בדפדפן שלכם ונשלח ישירות לגוגל בלבד.
             משיגים מפתח בחינם ב-aistudio.google.com › Get API Key.</p>
         </div>
 
         <div class="form-group">
-          <label>שפת יעד</label>
+          <label for="sel-target-lang">שפת יעד</label>
           <select id="sel-target-lang">
             <option value="he">עברית</option>
             <option value="en" selected>אנגלית</option>
@@ -243,7 +244,8 @@
           </select>
         </div>
 
-        <div class="form-group">
+        <fieldset class="form-group radio-fieldset">
+          <legend class="hint">אופן התרגום</legend>
           <label class="checkbox-row">
             <input type="radio" name="translate-mode" value="replace" checked>
             החלפת הטקסט המקורי בתרגום
@@ -252,40 +254,40 @@
             <input type="radio" name="translate-mode" value="append">
             הוספת התרגום מתחת למקור (דו־לשוני)
           </label>
-        </div>
+        </fieldset>
 
         <div class="translate-actions">
           <button id="btn-translate-all" class="btn btn-primary">🌐 תרגום כל הכתוביות</button>
           <button id="btn-translate-selected" class="btn">תרגום הכתובית שנבחרה</button>
         </div>
-        <p id="translate-status" class="hint"></p>
-        <p class="hint">שפת המקור מזוהה אוטומטית. התרגום משתמש ב-Google Translate (עם גיבוי MyMemory) ודורש חיבור לאינטרנט.</p>
+        <p id="translate-status" class="hint" role="status" aria-live="polite"></p>
+        <p class="hint">שפת המקור מזוהה אוטומטית. התרגום דורש חיבור לאינטרנט.</p>
       </div>
 
       <!-- --- טאב תמלול --- -->
-      <div class="tab-content" id="tab-transcribe">
+      <div class="tab-content" id="tab-transcribe" role="tabpanel" aria-labelledby="tab-btn-transcribe" tabindex="0">
         <p class="hint" style="margin-bottom:12px">
-          תמלול אוטומטי יוצר כתוביות מסרטון שאין בו כתוביות — זיהוי דיבור (Whisper) שרץ כולו בדפדפן.
-          בפעם הראשונה יורד מודל (חד־פעמי, נשמר בדפדפן), ולכן נדרש חיבור לאינטרנט.
+          תמלול אוטומטי יוצר כתוביות מסרטון שאין בו כתוביות. מנוע ברירת המחדל הוא
+          ElevenLabs Scribe — המדויק ביותר, כולל עברית — ודורש מפתח API (חינמי).
         </p>
 
         <div class="form-group">
-          <label>מנוע תמלול</label>
+          <label for="sel-transcribe-engine">מנוע תמלול</label>
           <select id="sel-transcribe-engine">
-            <option value="browser" selected>בדפדפן (Whisper) — חינם, פרטי, איטי יותר</option>
-            <option value="elevenlabs">ElevenLabs Scribe — מדויק ומהיר, דורש מפתח API</option>
+            <option value="elevenlabs" selected>ElevenLabs Scribe — מדויק ומהיר, מומלץ לעברית</option>
+            <option value="browser">בדפדפן (Whisper) — חינם ופרטי, איטי ופחות מדויק</option>
           </select>
         </div>
 
-        <div class="form-group" id="elevenlabs-key-group" hidden>
-          <label>מפתח API של ElevenLabs</label>
+        <div class="form-group" id="elevenlabs-key-group">
+          <label for="input-elevenlabs-key">מפתח API של ElevenLabs</label>
           <input type="password" id="input-elevenlabs-key" placeholder="sk_..." autocomplete="off">
           <p class="hint">המפתח נשמר רק בדפדפן שלכם (localStorage) ונשלח ישירות ל-ElevenLabs בלבד.
             משיגים מפתח בחינם ב-elevenlabs.io › הגדרות › API Keys.</p>
         </div>
 
-        <div class="form-group" id="whisper-model-group">
-          <label>איכות מודל</label>
+        <div class="form-group" id="whisper-model-group" hidden>
+          <label for="sel-whisper-model">איכות מודל</label>
           <select id="sel-whisper-model">
             <option value="tiny" selected>מהיר — הורדה ~40MB, דיוק בסיסי</option>
             <option value="base">מאוזן — הורדה ~80MB</option>
@@ -294,7 +296,7 @@
         </div>
 
         <div class="form-group">
-          <label>שפת הדיבור בסרטון</label>
+          <label for="sel-speech-lang">שפת הדיבור בסרטון</label>
           <select id="sel-speech-lang">
             <option value="auto" selected>זיהוי אוטומטי</option>
             <option value="he">עברית</option>
@@ -308,7 +310,7 @@
         </div>
 
         <div class="form-group">
-          <label>חלוקת הכתוביות</label>
+          <label for="sel-transcribe-granularity">חלוקת הכתוביות</label>
           <select id="sel-transcribe-granularity">
             <option value="sentence" selected>שורה שלמה (לפי משפטים)</option>
             <option value="1">מילה אחת בכל פעם</option>
@@ -317,56 +319,57 @@
           </select>
         </div>
 
+        <label class="checkbox-row">
+          <input type="checkbox" id="chk-diarize" checked>
+          זיהוי דוברים אוטומטי (ElevenLabs בלבד) — אחרי התמלול תוכלו להזין את שמותיהם
+        </label>
+
         <label class="checkbox-row" style="margin-bottom:12px">
           <input type="checkbox" id="chk-clear-before-transcribe" checked>
           מחיקת הכתוביות הקיימות לפני התמלול
         </label>
 
+        <div class="form-group">
+          <label for="rng-word-gap">מרווח בין כתוביות: <span id="word-gap-value">0.05</span> שניות</label>
+          <input type="range" id="rng-word-gap" min="0" max="0.5" step="0.05" value="0.05">
+        </div>
+
+        <div class="form-group">
+          <label for="rng-sentence-gap">מרווח אחרי סוף משפט: <span id="sentence-gap-value">0.2</span> שניות</label>
+          <input type="range" id="rng-sentence-gap" min="0" max="1" step="0.05" value="0.2">
+        </div>
+
         <div class="translate-actions">
           <button id="btn-transcribe" class="btn btn-primary">🎙️ תמלול אוטומטי של הסרטון</button>
         </div>
-        <div class="progress-bar" id="transcribe-progress-wrap" hidden>
+        <div class="progress-bar" id="transcribe-progress-wrap" hidden role="progressbar" aria-label="התקדמות התמלול">
           <div class="progress-fill" id="transcribe-progress"></div>
         </div>
-        <p id="transcribe-status" class="hint"></p>
-        <p class="hint">אחרי התמלול אפשר לעבור לטאב "תרגום" ולתרגם את התוצאה לכל שפה.</p>
+        <p id="transcribe-status" class="hint" role="status" aria-live="polite"></p>
+
+        <div id="speakers-section" hidden>
+          <h3>שמות הדוברים</h3>
+          <p class="hint">זוהו הדוברים הבאים. הזינו שם לכל דובר ולחצו על ההחלה — השם יופיע בתחילת הכתוביות שלו.</p>
+          <div id="speakers-list"></div>
+          <button id="btn-apply-speakers" class="btn btn-primary" style="margin-top:8px">החלת שמות הדוברים</button>
+        </div>
+
+        <p class="hint">אחרי התמלול אפשר לעבור לטאב "תרגום" ולתרגם את התוצאה לכל שפה. נתמכים סרטונים ארוכים (עד שעה ויותר).</p>
       </div>
 
       <!-- --- טאב חיתוך --- -->
-      <div class="tab-content" id="tab-cuts">
+      <div class="tab-content" id="tab-cuts" role="tabpanel" aria-labelledby="tab-btn-cuts" tabindex="0">
         <p class="hint" style="margin-bottom:12px">
-          זיהוי אוטומטי של רגעים שקטים בסרטון ומחיקתם מהסרטון המיוצא.
-          החיתוך חל על "הורדת הסרטון עם הכתוביות" ועל ייצוא SRT/VTT — הסרטון המקורי לא נפגע.
+          לחיצה אחת מזהה את הרגעים השקטים ומוחקת אותם מהסרטון המיוצא — בלי שום כיוונון.
+          הסף נקבע אוטומטית מרמות הקול של הסרטון, וקטעים שבהם יש כתוביות (דיבור) מוגנים ולא נחתכים.
+          הסרטון המקורי לא נפגע.
         </p>
 
-        <div class="form-group">
-          <label>שיטת זיהוי</label>
-          <select id="sel-silence-mode">
-            <option value="auto" selected>אוטומטית — לפי רמות הקול של הסרטון עצמו (מומלץ)</option>
-            <option value="manual">ידנית — סף קבוע</option>
-          </select>
-        </div>
-
-        <div class="form-group" id="silence-threshold-group" hidden>
-          <label>סף שקט: <span id="silence-threshold-value">-40</span> dB</label>
-          <input type="range" id="rng-silence-threshold" min="-60" max="-20" value="-40">
-        </div>
-
-        <div class="form-group">
-          <label>משך שקט מינימלי למחיקה: <span id="silence-mindur-value">0.6</span> שניות</label>
-          <input type="range" id="rng-silence-mindur" min="0.3" max="3" step="0.1" value="0.6">
-        </div>
-
-        <div class="form-group">
-          <label>ריפוד סביב דיבור: <span id="silence-pad-value">0.15</span> שניות</label>
-          <input type="range" id="rng-silence-pad" min="0" max="0.5" step="0.05" value="0.15">
-        </div>
-
         <div class="translate-actions">
-          <button id="btn-detect-silence" class="btn btn-primary">🔇 זיהוי רגעים שקטים</button>
+          <button id="btn-detect-silence" class="btn btn-primary">🔇 זיהוי ומחיקת רגעים שקטים</button>
           <button id="btn-clear-cuts" class="btn">ניקוי החיתוך</button>
         </div>
-        <p id="cuts-status" class="hint"></p>
+        <p id="cuts-status" class="hint" role="status" aria-live="polite"></p>
 
         <label class="checkbox-row" style="margin:10px 0">
           <input type="checkbox" id="chk-skip-silences" checked>
@@ -374,7 +377,7 @@
         </label>
 
         <div class="form-group">
-          <label>אפקט מעבר בנקודות החיתוך</label>
+          <label for="sel-cut-transition">אפקט מעבר בנקודות החיתוך</label>
           <select id="sel-cut-transition">
             <option value="none" selected>חיתוך ישיר (בלי אפקט)</option>
             <option value="fade-black">עמעום לשחור</option>
@@ -382,55 +385,33 @@
             <option value="zoom">זום קצר</option>
           </select>
         </div>
-      </div>
 
-      <!-- --- טאב דיבוב --- -->
-      <div class="tab-content" id="tab-dub">
-        <p class="hint" style="margin-bottom:12px">
-          הקראת הכתוביות בקול AI טבעי (ElevenLabs) — למשל אחרי תרגום, ליצירת סרטון מדובב.
-          כל כתובית מוקראת ומונחת בנקודת הזמן שלה.
-        </p>
+        <details class="advanced-settings">
+          <summary>הגדרות מתקדמות (לא חובה)</summary>
 
-        <div class="form-group">
-          <label>מפתח API של ElevenLabs</label>
-          <input type="password" id="input-elevenlabs-key-dub" placeholder="sk_..." autocomplete="off">
-        </div>
-
-        <div class="form-group">
-          <label>קול</label>
-          <div style="display:flex; gap:8px">
-            <select id="sel-dub-voice" style="flex:1"><option value="">— טענו קולות —</option></select>
-            <button id="btn-load-voices" class="btn">טעינה</button>
+          <div class="form-group">
+            <label for="sel-silence-mode">שיטת זיהוי</label>
+            <select id="sel-silence-mode">
+              <option value="auto" selected>אוטומטית — לפי רמות הקול של הסרטון (מומלץ)</option>
+              <option value="manual">ידנית — סף קבוע</option>
+            </select>
           </div>
-        </div>
 
-        <div class="form-group">
-          <label>מודל קול</label>
-          <select id="sel-dub-model">
-            <option value="eleven_v3" selected>Eleven v3 — 70+ שפות כולל עברית</option>
-            <option value="eleven_multilingual_v2">Multilingual v2 — 29 שפות (בלי עברית)</option>
-            <option value="eleven_flash_v2_5">Flash v2.5 — מהיר וזול</option>
-          </select>
-        </div>
-
-        <div class="translate-actions">
-          <button id="btn-generate-dub" class="btn btn-primary">🎤 יצירת דיבוב מהכתוביות</button>
-        </div>
-        <div class="progress-bar" id="dub-progress-wrap" hidden>
-          <div class="progress-fill" id="dub-progress"></div>
-        </div>
-        <p id="dub-status" class="hint"></p>
-
-        <div id="dub-result" hidden>
-          <div class="translate-actions">
-            <button id="btn-preview-dub" class="btn">▶️ האזנה לדיבוב</button>
-            <button id="btn-download-dub" class="btn">⬇️ הורדת קובץ האודיו (WAV)</button>
+          <div class="form-group" id="silence-threshold-group" hidden>
+            <label for="rng-silence-threshold">סף שקט: <span id="silence-threshold-value">-40</span> dB</label>
+            <input type="range" id="rng-silence-threshold" min="-60" max="-20" value="-40">
           </div>
-          <label class="checkbox-row" style="margin-top:10px">
-            <input type="checkbox" id="chk-use-dubbing" checked>
-            שימוש בדיבוב במקום האודיו המקורי בייצוא הווידאו
-          </label>
-        </div>
+
+          <div class="form-group">
+            <label for="rng-silence-mindur">משך שקט מינימלי למחיקה: <span id="silence-mindur-value">0.6</span> שניות</label>
+            <input type="range" id="rng-silence-mindur" min="0.3" max="3" step="0.1" value="0.6">
+          </div>
+
+          <div class="form-group">
+            <label for="rng-silence-pad">ריפוד סביב דיבור: <span id="silence-pad-value">0.2</span> שניות</label>
+            <input type="range" id="rng-silence-pad" min="0" max="0.5" step="0.05" value="0.2">
+          </div>
+        </details>
       </div>
     </aside>
   </main>

@@ -430,6 +430,33 @@ body {
   font-size: 0.8rem;
 }
 
+/* ===== נגישות ===== */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.advanced-settings {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.advanced-settings summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+.advanced-settings summary:hover { color: var(--text); }
+.radio-fieldset { border: none; padding: 0; margin: 0 0 14px; }
+.radio-fieldset legend { padding: 0; margin-bottom: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+  .progress-fill { transition: none; }
+  .fx-pulse, .fx-shake { animation: none; }
+}
+
 /* ===== רספונסיביות ===== */
 @media (max-width: 900px) {
   .app-layout { flex-direction: column; overflow-y: auto; }

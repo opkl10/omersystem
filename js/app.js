@@ -37,7 +37,7 @@ const state = {
   hasMedia: false,
   cuts: [],               // קטעים שקטים למחיקה: { start, end }
   audioData: null,        // מטמון PCM 16kHz של האודיו (לגל קול, שקט, תמלול)
-  dubBuffer: null,        // פס דיבוב שנוצר עם ElevenLabs
+  speakers: {},           // מזהה דובר -> שם (מזיהוי דוברים בתמלול)
 };
 
 // ---------- אלמנטים ----------
@@ -820,7 +820,6 @@ function loadVideoFile(file) {
   state.hasMedia = true;
   state.mediaFile = file;
   state.audioData = null;
-  state.dubBuffer = null;
   $('video-placeholder').classList.add('hidden');
   buildWaveform();
 }
@@ -910,13 +909,37 @@ $('btn-add-at-time').addEventListener('click', () => {
   addSubtitle(t, t + 3);
 });
 
-// ---------- טאבים ----------
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    $('tab-' + tab.dataset.tab).classList.add('active');
+// ---------- טאבים (עם תמיכת מקלדת ו-ARIA) ----------
+const allTabs = [...document.querySelectorAll('.tab')];
+
+function activateTab(tab) {
+  allTabs.forEach(t => {
+    t.classList.remove('active');
+    t.setAttribute('aria-selected', 'false');
+    t.setAttribute('tabindex', '-1');
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  tab.classList.add('active');
+  tab.setAttribute('aria-selected', 'true');
+  tab.setAttribute('tabindex', '0');
+  $('tab-' + tab.dataset.tab).classList.add('active');
+}
+
+allTabs.forEach((tab, i) => {
+  tab.setAttribute('tabindex', tab.classList.contains('active') ? '0' : '-1');
+  tab.addEventListener('click', () => activateTab(tab));
+  // ניווט בין טאבים עם חיצי המקלדת (בממשק RTL חץ שמאלה מתקדם)
+  tab.addEventListener('keydown', (e) => {
+    let next = null;
+    if (e.key === 'ArrowLeft') next = allTabs[(i + 1) % allTabs.length];
+    if (e.key === 'ArrowRight') next = allTabs[(i - 1 + allTabs.length) % allTabs.length];
+    if (e.key === 'Home') next = allTabs[0];
+    if (e.key === 'End') next = allTabs[allTabs.length - 1];
+    if (next) {
+      e.preventDefault();
+      activateTab(next);
+      next.focus();
+    }
   });
 });
 
@@ -987,6 +1010,7 @@ function saveProject() {
     globalStyle: state.globalStyle,
     customFonts: state.customFonts,
     cuts: state.cuts,
+    speakers: state.speakers,
   };
   downloadFile('subtitle-project.json', JSON.stringify(data, null, 2), 'application/json');
 }
@@ -997,9 +1021,11 @@ async function importProject(file) {
     state.subtitles = (data.subtitles || []).map(s => ({
       id: s.id, start: s.start, end: s.end, text: s.text || '',
       style: s.style ? { ...DEFAULT_STYLE, ...s.style } : null,
+      speaker: s.speaker || null,
     }));
     state.globalStyle = { ...DEFAULT_STYLE, ...(data.globalStyle || {}) };
     state.cuts = Array.isArray(data.cuts) ? data.cuts : [];
+    state.speakers = data.speakers || {};
     state.customFonts = [];
     for (const f of (data.customFonts || [])) {
       try {
@@ -1013,6 +1039,7 @@ async function importProject(file) {
     renderFontLists();
     renderAll();
     syncStylePanel();
+    renderSpeakersUI(Object.keys(state.speakers).length > 1);
   } catch (err) {
     alert('שגיאה בטעינת הפרויקט: ' + (err.message || err));
   }
@@ -1283,6 +1310,24 @@ $('sel-silence-mode').addEventListener('change', () => {
   $('silence-threshold-group').hidden = $('sel-silence-mode').value !== 'manual';
 });
 
+// החסרת טווחי כתוביות (דיבור) מקטעי החיתוך, עם שוליים של 0.15s לכל צד
+function subtractSpeechSpans(cuts) {
+  const spans = state.subtitles
+    .filter(s => isFinite(s.start) && isFinite(s.end))
+    .map(s => ({ start: s.start - 0.15, end: s.end + 0.15 }));
+  let out = cuts;
+  for (const sp of spans) {
+    const next = [];
+    for (const c of out) {
+      if (sp.end <= c.start || sp.start >= c.end) { next.push(c); continue; }
+      if (sp.start - c.start > 0.3) next.push({ start: c.start, end: sp.start });
+      if (c.end - sp.end > 0.3) next.push({ start: sp.end, end: c.end });
+    }
+    out = next;
+  }
+  return out;
+}
+
 async function detectSilencesInMedia() {
   const status = $('cuts-status');
   if (!state.mediaFile) {
@@ -1311,12 +1356,23 @@ async function detectSilencesInMedia() {
 
     const minDur = Number($('rng-silence-mindur').value);
     const pad = Number($('rng-silence-pad').value);
-    state.cuts = detectSilences(dbs, 16000, thresholdDb, minDur, pad);
+    const rawCuts = detectSilences(dbs, 16000, thresholdDb, minDur, pad);
+
+    // הגנת דיבור: קטעים שחופפים לכתוביות מתוזמנות לא נחתכים —
+    // הכתוביות מסמנות איפה יש דיבור, אז מחסירים אותן מהחיתוך
+    state.cuts = subtractSpeechSpans(rawCuts);
+    const protectedCount = rawCuts.length - state.cuts.length;
+
     const saved = state.cuts.reduce((n, c) => n + (c.end - c.start), 0);
     const total = audio.length / 16000;
+    const protectedNote = state.subtitles.length
+      ? (protectedCount > 0 || rawCuts.length !== state.cuts.length
+        ? ' קטעים שחופפים לכתוביות הוגנו ולא ייחתכו.'
+        : ' אף קטע לא חפף לכתוביות.')
+      : '';
     status.textContent = state.cuts.length
-      ? `✂️ נמצאו ${state.cuts.length} קטעים שקטים — סה"כ ${saved.toFixed(1)} שניות (${Math.round(saved / total * 100)}% מהסרטון) יימחקו בייצוא${thresholdNote}.`
-      : `לא נמצאו קטעים שקטים${thresholdNote}. נסו לקצר את "משך שקט מינימלי" — אולי ההפסקות בסרטון קצרות.`;
+      ? `✂️ נמצאו ${state.cuts.length} קטעים שקטים — סה"כ ${saved.toFixed(1)} שניות (${Math.round(saved / total * 100)}% מהסרטון) יימחקו בייצוא${thresholdNote}.${protectedNote}`
+      : `לא נמצאו קטעים שקטים למחיקה${thresholdNote}.`;
     renderTimeline();
   } catch (err) {
     status.textContent = '❌ הניתוח נכשל: ' + (err.message || err);
@@ -1509,17 +1565,6 @@ async function exportVideoWithSubtitles() {
   const scale = H / (overlay.clientHeight || 540);
 
   const stream = canvas.captureStream(30);
-  const useDub = !!(state.dubBuffer && $('chk-use-dubbing').checked && !$('dub-result').hidden);
-  let dubSource = null;
-  let dubDest = null;
-  const startDubAt = (offset) => {
-    if (dubSource) { try { dubSource.stop(); } catch (_) {} }
-    dubSource = exportAudioCtx.createBufferSource();
-    dubSource.buffer = state.dubBuffer;
-    dubSource.connect(dubDest);
-    dubSource.start(0, Math.min(offset, state.dubBuffer.duration - 0.01));
-  };
-  const wasMuted = video.muted;
   try {
     if (!exportAudioCtx) {
       exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1528,13 +1573,7 @@ async function exportVideoWithSubtitles() {
     }
     await exportAudioCtx.resume();
     const dest = exportAudioCtx.createMediaStreamDestination();
-    if (useDub) {
-      // דיבוב במקום האודיו המקורי: משתיקים את הווידאו ומזרימים את פס הדיבוב
-      video.muted = true;
-      dubDest = dest;
-    } else {
-      exportSourceNode.connect(dest);
-    }
+    exportSourceNode.connect(dest);
     const audioTrack = dest.stream.getAudioTracks()[0];
     if (audioTrack) stream.addTrack(audioTrack);
   } catch (_) { /* ממשיכים בלי אודיו */ }
@@ -1566,8 +1605,6 @@ async function exportVideoWithSubtitles() {
     exportRecorder = null;
     $('btn-export-video').disabled = false;
     $('export-video-bar').hidden = true;
-    if (dubSource) { try { dubSource.stop(); } catch (_) {} dubSource = null; }
-    video.muted = wasMuted;
     video.pause();
     updatePlayButton();
   };
@@ -1587,7 +1624,6 @@ async function exportVideoWithSubtitles() {
 
   exportRecorder.start(1000);
   await video.play();
-  if (useDub) startDubAt(0);
   updatePlayButton();
 
   const drawLoop = () => {
@@ -1598,7 +1634,6 @@ async function exportVideoWithSubtitles() {
     const cut = activeCutAt(t);
     if (cut && cut.end < video.duration - 0.1) {
       video.currentTime = cut.end + 0.01;
-      if (useDub) startDubAt(cut.end + 0.01); // סנכרון פס הדיבוב לקפיצה
     } else if (cut) {
       // הקטע השקט מגיע עד סוף הסרטון — מסיימים כאן
       if (exportRecorder.state !== 'inactive') exportRecorder.stop();
@@ -1757,7 +1792,7 @@ try {
 } catch (_) {}
 
 // בניית כתוביות מרשימת מילים עם תזמון: שבירה אחרי maxWords מילים,
-// בסוף משפט או בהפסקת דיבור ארוכה
+// בסוף משפט, בהפסקת דיבור ארוכה או בהחלפת דובר
 function wordsToSubtitles(words, maxWords = 10) {
   const subs = [];
   let cur = null;
@@ -1765,9 +1800,13 @@ function wordsToSubtitles(words, maxWords = 10) {
     if (w.type && w.type !== 'word') continue;
     const text = (w.text || '').trim();
     if (!text) continue;
-    if (cur && (w.start - cur.end > 0.8)) { subs.push(cur); cur = null; }
+    const speaker = w.speaker_id || null;
+    if (cur && (w.start - cur.end > 0.8 || (speaker && cur.speaker && speaker !== cur.speaker))) {
+      subs.push(cur);
+      cur = null;
+    }
     if (!cur) {
-      cur = { start: w.start, end: w.end, text, count: 1 };
+      cur = { start: w.start, end: w.end, text, count: 1, speaker };
     } else {
       cur.text += ' ' + text;
       cur.end = w.end;
@@ -1776,7 +1815,7 @@ function wordsToSubtitles(words, maxWords = 10) {
     if (/[.!?…]$/.test(text) || cur.count >= maxWords) { subs.push(cur); cur = null; }
   }
   if (cur) subs.push(cur);
-  return subs.map(s => ({ start: s.start, end: Math.max(s.end, s.start + 0.4), text: s.text }));
+  return subs.map(s => ({ start: s.start, end: Math.max(s.end, s.start + 0.4), text: s.text, speaker: s.speaker }));
 }
 
 // גודל הקבוצה שנבחר בטאב התמלול: מספר מילים, או null עבור "שורה שלמה"
@@ -1784,6 +1823,43 @@ function transcribeGranularity() {
   const v = $('sel-transcribe-granularity').value;
   return v === 'sentence' ? null : Number(v);
 }
+
+// אכיפת מרווחים בין כתוביות עוקבות: מרווח רגיל בין כתוביות,
+// ומרווח גדול יותר אחרי סוף משפט. גם מבטיח שאין חפיפות.
+function applyGaps(pieces) {
+  const wordGap = Number($('rng-word-gap').value);
+  const sentenceGap = Number($('rng-sentence-gap').value);
+  for (let i = 0; i < pieces.length - 1; i++) {
+    const cur = pieces[i], next = pieces[i + 1];
+    const gap = /[.!?…]\s*$/.test(cur.text) ? sentenceGap : wordGap;
+    if (next.start - cur.end < gap) {
+      cur.end = Math.max(cur.start + 0.25, next.start - gap);
+    }
+  }
+  return pieces;
+}
+
+// תיקון חפיפות: כתובית שנמשכת לתוך הבאה מתקצרת עד תחילתה
+function fixOverlaps() {
+  sortSubtitles();
+  let fixed = 0;
+  for (let i = 0; i < state.subtitles.length - 1; i++) {
+    const cur = state.subtitles[i], next = state.subtitles[i + 1];
+    if (cur.end > next.start) {
+      cur.end = Math.max(cur.start + 0.15, next.start - 0.01);
+      fixed++;
+    }
+  }
+  return fixed;
+}
+
+$('btn-fix-overlaps').addEventListener('click', () => {
+  const fixed = fixOverlaps();
+  renderAll();
+  $('subtitles-status').textContent = fixed
+    ? `✅ תוקנו ${fixed} חפיפות בין כתוביות.`
+    : 'אין חפיפות — הכול תקין.';
+});
 
 async function transcribeWithElevenLabs(status) {
   const apiKey = $('input-elevenlabs-key').value.trim();
@@ -1794,6 +1870,7 @@ async function transcribeWithElevenLabs(status) {
   form.append('file', state.mediaFile);
   form.append('model_id', 'scribe_v1');
   form.append('timestamps_granularity', 'word');
+  if ($('chk-diarize').checked) form.append('diarize', 'true');
   const lang = $('sel-speech-lang').value;
   if (lang !== 'auto') form.append('language_code', lang);
 
@@ -1881,17 +1958,40 @@ async function transcribeVideo() {
       return;
     }
 
+    applyGaps(pieces);
+
     if ($('chk-clear-before-transcribe').checked) {
       state.subtitles = [];
       state.selectedId = null;
     }
 
+    // דוברים שזוהו מקבלים תווית זמנית ("דובר 1") שאפשר להחליף בשם אמיתי
+    const speakerIds = [...new Set(pieces.map(p => p.speaker).filter(Boolean))];
+    state.speakers = {};
+    speakerIds.forEach((id, i) => { state.speakers[id] = 'דובר ' + (i + 1); });
+
+    const created = [];
     for (const piece of pieces) {
-      state.subtitles.push({ id: state.nextId++, start: piece.start, end: piece.end, text: piece.text, style: null });
+      const sub = {
+        id: state.nextId++,
+        start: piece.start,
+        end: piece.end,
+        text: piece.speaker && speakerIds.length > 1
+          ? state.speakers[piece.speaker] + ': ' + piece.text
+          : piece.text,
+        style: null,
+        speaker: piece.speaker || null,
+      };
+      state.subtitles.push(sub);
+      created.push(sub);
     }
+    fixOverlaps();
     sortSubtitles();
     renderAll();
-    status.textContent = `✅ נוצרו ${pieces.length} כתוביות מהתמלול. אפשר לערוך אותן בטאב "כתוביות" או לתרגם בטאב "תרגום".`;
+    renderSpeakersUI(speakerIds.length > 1);
+    status.textContent = `✅ נוצרו ${created.length} כתוביות מהתמלול` +
+      (speakerIds.length > 1 ? ` וזוהו ${speakerIds.length} דוברים — הזינו את שמותיהם למטה.` : '.') +
+      ' אפשר לערוך בטאב "כתוביות" או לתרגם בטאב "תרגום".';
   } catch (err) {
     status.textContent = '❌ התמלול נכשל: ' + (err.message || err) +
       ' — ודאו חיבור לאינטרנט. (בגרסה המתארחת ב-Artifact הגישה לרשת חסומה — הורידו את הקובץ ופתחו מקומית)';
@@ -1902,186 +2002,52 @@ async function transcribeVideo() {
   }
 }
 
+for (const [rid, vid] of [['rng-word-gap', 'word-gap-value'], ['rng-sentence-gap', 'sentence-gap-value']]) {
+  $(rid).addEventListener('input', () => { $(vid).textContent = $(rid).value; });
+}
+
 $('btn-transcribe').addEventListener('click', transcribeVideo);
 
-// ---------- דיבוב עם ElevenLabs ----------
-// שדה המפתח בטאב הדיבוב מסונכרן עם זה שבטאב התמלול (אותו localStorage)
-$('input-elevenlabs-key-dub').addEventListener('change', () => {
-  const v = $('input-elevenlabs-key-dub').value.trim();
-  $('input-elevenlabs-key').value = v;
-  try { localStorage.setItem('elevenlabs-api-key', v); } catch (_) {}
-});
-try {
-  const k = localStorage.getItem('elevenlabs-api-key');
-  if (k) $('input-elevenlabs-key-dub').value = k;
-} catch (_) {}
-
-function elevenLabsKey() {
-  return ($('input-elevenlabs-key-dub').value || $('input-elevenlabs-key').value).trim();
-}
-
-let dubAudioCtx = null;
-function getDubAudioCtx() {
-  if (!dubAudioCtx) dubAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  return dubAudioCtx;
-}
-
-async function loadVoices() {
-  const key = elevenLabsKey();
-  const status = $('dub-status');
-  if (!key) { status.textContent = 'הזינו קודם מפתח API של ElevenLabs.'; return; }
-  status.textContent = 'טוען קולות...';
-  try {
-    const res = await fetchWithTimeout('https://api.elevenlabs.io/v1/voices', 20000, {
-      headers: { 'xi-api-key': key },
-    });
-    if (res.status === 401) throw new Error('מפתח ה-API לא תקין');
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    const sel = $('sel-dub-voice');
-    sel.innerHTML = '';
-    for (const v of (data.voices || [])) {
-      const opt = document.createElement('option');
-      opt.value = v.voice_id;
-      opt.textContent = v.name + (v.labels && v.labels.accent ? ` (${v.labels.accent})` : '');
-      sel.appendChild(opt);
-    }
-    status.textContent = `✅ נטענו ${(data.voices || []).length} קולות. בחרו קול ולחצו על יצירת דיבוב.`;
-  } catch (err) {
-    status.textContent = '❌ טעינת הקולות נכשלה: ' + (err.message || err);
+// ---------- שמות דוברים ----------
+function renderSpeakersUI(show) {
+  const section = $('speakers-section');
+  const list = $('speakers-list');
+  section.hidden = !show;
+  if (!show) return;
+  list.innerHTML = '';
+  for (const [id, label] of Object.entries(state.speakers)) {
+    const group = document.createElement('div');
+    group.className = 'form-group';
+    const lbl = document.createElement('label');
+    lbl.textContent = label;
+    lbl.setAttribute('for', 'speaker-input-' + id);
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'speaker-input-' + id;
+    input.value = label;
+    input.dataset.speakerId = id;
+    group.append(lbl, input);
+    list.appendChild(group);
   }
 }
-$('btn-load-voices').addEventListener('click', loadVoices);
 
-async function ttsClip(text, voiceId, modelId, key) {
-  const res = await fetchWithTimeout(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
-    60000,
-    {
-      method: 'POST',
-      headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: modelId }),
-    });
-  if (res.status === 401) throw new Error('מפתח ה-API לא תקין');
-  if (!res.ok) {
-    let detail = 'HTTP ' + res.status;
-    try { detail = (await res.json()).detail?.message || detail; } catch (_) {}
-    throw new Error(detail);
-  }
-  const buf = await res.arrayBuffer();
-  return await getDubAudioCtx().decodeAudioData(buf);
-}
-
-let dubbingInProgress = false;
-
-async function generateDub() {
-  if (dubbingInProgress) return;
-  const status = $('dub-status');
-  const key = elevenLabsKey();
-  if (!key) { status.textContent = 'הזינו קודם מפתח API של ElevenLabs.'; return; }
-  const voiceId = $('sel-dub-voice').value;
-  if (!voiceId) { status.textContent = 'טענו ובחרו קול קודם.'; return; }
-  sortSubtitles();
-  const subs = state.subtitles.filter(s => s.text.trim());
-  if (!subs.length) { status.textContent = 'אין כתוביות להקראה.'; return; }
-
-  dubbingInProgress = true;
-  $('btn-generate-dub').disabled = true;
-  $('dub-progress-wrap').hidden = false;
-  const modelId = $('sel-dub-model').value;
-
-  try {
-    const clips = [];
-    for (let i = 0; i < subs.length; i++) {
-      status.textContent = `מקריא כתובית ${i + 1} מתוך ${subs.length}...`;
-      $('dub-progress').style.width = Math.round(i / subs.length * 100) + '%';
-      const plain = subs[i].text.replace(/\*/g, '').replace(/\n/g, ' ');
-      clips.push({ buffer: await ttsClip(plain, voiceId, modelId, key), at: subs[i].start, sub: subs[i] });
-    }
-
-    status.textContent = 'מרכיב את פס הקול...';
-    $('dub-progress').style.width = '100%';
-    const totalDur = Math.max(timelineDuration(), clips.length ? clips[clips.length - 1].at + clips[clips.length - 1].buffer.duration : 1) + 0.5;
-    const offline = new OfflineAudioContext(1, Math.ceil(totalDur * 44100), 44100);
-    clips.forEach((clip, i) => {
-      const src = offline.createBufferSource();
-      src.buffer = clip.buffer;
-      // אם ההקראה ארוכה מהחלון עד הכתובית הבאה — מאיצים מעט כדי שלא תדרוס אותה
-      const slot = (i < clips.length - 1 ? clips[i + 1].at : totalDur) - clip.at;
-      if (slot > 0.2 && clip.buffer.duration > slot) {
-        src.playbackRate.value = Math.min(1.6, clip.buffer.duration / slot);
+$('btn-apply-speakers').addEventListener('click', () => {
+  const inputs = $('speakers-list').querySelectorAll('input[data-speaker-id]');
+  for (const input of inputs) {
+    const id = input.dataset.speakerId;
+    const oldLabel = state.speakers[id];
+    const newLabel = input.value.trim() || oldLabel;
+    if (newLabel === oldLabel) continue;
+    for (const sub of state.subtitles) {
+      if (sub.speaker === id && sub.text.startsWith(oldLabel + ': ')) {
+        sub.text = newLabel + ': ' + sub.text.slice(oldLabel.length + 2);
       }
-      src.connect(offline.destination);
-      src.start(clip.at);
-    });
-    state.dubBuffer = await offline.startRendering();
-    $('dub-result').hidden = false;
-    status.textContent = `✅ הדיבוב מוכן (${state.dubBuffer.duration.toFixed(1)} שניות). אפשר להאזין, להוריד, או לייצא וידאו עם הדיבוב.`;
-  } catch (err) {
-    status.textContent = '❌ הדיבוב נכשל: ' + (err.message || err);
-  } finally {
-    dubbingInProgress = false;
-    $('btn-generate-dub').disabled = false;
-    $('dub-progress-wrap').hidden = true;
-  }
-}
-$('btn-generate-dub').addEventListener('click', generateDub);
-
-// האזנה לדיבוב
-let dubPreviewSource = null;
-$('btn-preview-dub').addEventListener('click', () => {
-  const ctx = getDubAudioCtx();
-  if (dubPreviewSource) {
-    try { dubPreviewSource.stop(); } catch (_) {}
-    dubPreviewSource = null;
-    $('btn-preview-dub').textContent = '▶️ האזנה לדיבוב';
-    return;
-  }
-  if (!state.dubBuffer) return;
-  ctx.resume();
-  dubPreviewSource = ctx.createBufferSource();
-  dubPreviewSource.buffer = state.dubBuffer;
-  dubPreviewSource.connect(ctx.destination);
-  dubPreviewSource.onended = () => {
-    dubPreviewSource = null;
-    $('btn-preview-dub').textContent = '▶️ האזנה לדיבוב';
-  };
-  dubPreviewSource.start();
-  $('btn-preview-dub').textContent = '⏹ עצירה';
-});
-
-// קידוד AudioBuffer ל-WAV (PCM16)
-function audioBufferToWav(buffer) {
-  const ch = buffer.numberOfChannels;
-  const sr = buffer.sampleRate;
-  const len = buffer.length * ch * 2;
-  const out = new ArrayBuffer(44 + len);
-  const dv = new DataView(out);
-  const wStr = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
-  wStr(0, 'RIFF'); dv.setUint32(4, 36 + len, true); wStr(8, 'WAVE');
-  wStr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
-  dv.setUint16(22, ch, true); dv.setUint32(24, sr, true);
-  dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true);
-  wStr(36, 'data'); dv.setUint32(40, len, true);
-  let off = 44;
-  for (let i = 0; i < buffer.length; i++) {
-    for (let c = 0; c < ch; c++) {
-      const v = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i]));
-      dv.setInt16(off, v < 0 ? v * 0x8000 : v * 0x7fff, true);
-      off += 2;
     }
+    state.speakers[id] = newLabel;
   }
-  return out;
-}
-
-$('btn-download-dub').addEventListener('click', () => {
-  if (!state.dubBuffer) return;
-  const blob = new Blob([audioBufferToWav(state.dubBuffer)], { type: 'audio/wav' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'dubbing.wav';
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  renderSpeakersUI(true);
+  renderAll();
+  $('transcribe-status').textContent = '✅ שמות הדוברים הוחלו על הכתוביות.';
 });
 
 // ---------- קיצורי מקלדת ----------
