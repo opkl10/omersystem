@@ -76,6 +76,7 @@
         <button class="tab" data-tab="translate" role="tab" id="tab-btn-translate" aria-controls="tab-translate" aria-selected="false">תרגום</button>
         <button class="tab" data-tab="transcribe" role="tab" id="tab-btn-transcribe" aria-controls="tab-transcribe" aria-selected="false">תמלול</button>
         <button class="tab" data-tab="cuts" role="tab" id="tab-btn-cuts" aria-controls="tab-cuts" aria-selected="false">חיתוך</button>
+        <button class="tab" data-tab="settings" role="tab" id="tab-btn-settings" aria-controls="tab-settings" aria-selected="false">⚙️</button>
       </div>
 
       <!-- --- טאב כתוביות --- -->
@@ -239,12 +240,7 @@
           <div class="progress-fill" id="translate-progress"></div>
         </div>
 
-        <div class="form-group" id="gemini-key-group" hidden>
-          <label for="input-gemini-key">מפתח API של Gemini</label>
-          <input type="password" id="input-gemini-key" placeholder="AIza..." autocomplete="off">
-          <p class="hint">המפתח נשמר רק בדפדפן שלכם ונשלח ישירות לגוגל בלבד.
-            משיגים מפתח בחינם ב-aistudio.google.com › Get API Key.</p>
-        </div>
+        <p class="hint" id="gemini-key-hint">מפתח ה-API של Gemini מוזן פעם אחת בטאב <b>⚙️ הגדרות</b>. <span id="gemini-key-status"></span></p>
 
         <div class="form-group">
           <label for="sel-target-lang">שפת יעד</label>
@@ -303,12 +299,7 @@
           </select>
         </div>
 
-        <div class="form-group" id="elevenlabs-key-group">
-          <label for="input-elevenlabs-key">מפתח API של ElevenLabs</label>
-          <input type="password" id="input-elevenlabs-key" placeholder="sk_..." autocomplete="off">
-          <p class="hint">המפתח נשמר רק בדפדפן שלכם (localStorage) ונשלח ישירות ל-ElevenLabs בלבד.
-            משיגים מפתח בחינם ב-elevenlabs.io › הגדרות › API Keys.</p>
-        </div>
+        <p class="hint" id="elevenlabs-key-hint">מפתח ה-API של ElevenLabs מוזן פעם אחת בטאב <b>⚙️ הגדרות</b>. <span id="elevenlabs-key-status"></span></p>
 
         <div class="form-group" id="whisper-model-group" hidden>
           <label for="sel-whisper-model">איכות מודל</label>
@@ -451,6 +442,32 @@
             <input type="range" id="rng-silence-pad" min="0" max="0.5" step="0.05" value="0.2">
           </div>
         </details>
+      </div>
+
+      <!-- --- טאב הגדרות --- -->
+      <div class="tab-content" id="tab-settings" role="tabpanel" aria-labelledby="tab-btn-settings" tabindex="0">
+        <h3 style="margin-top:0">🔑 מפתחות API</h3>
+        <p class="hint" style="margin-bottom:14px">
+          כאן מזינים פעם אחת את כל המפתחות. הם נשמרים בדפדפן שלכם בלבד (localStorage)
+          ונשלחים ישירות לספק המתאים — לא לשום שרת אחר.
+        </p>
+
+        <div class="form-group" id="elevenlabs-key-group">
+          <label for="input-elevenlabs-key">מפתח ElevenLabs — לתמלול מדויק (Scribe)</label>
+          <input type="password" id="input-elevenlabs-key" placeholder="sk_..." autocomplete="off">
+          <p class="hint">משיגים בחינם: elevenlabs.io ← שם המשתמש ← API Keys ← Create API Key</p>
+        </div>
+
+        <div class="form-group" id="gemini-key-group">
+          <label for="input-gemini-key">מפתח Gemini — לתרגום איכותי</label>
+          <input type="password" id="input-gemini-key" placeholder="AIza..." autocomplete="off">
+          <p class="hint">משיגים בחינם: aistudio.google.com ← Get API Key ← Create API Key</p>
+        </div>
+
+        <p class="hint" style="margin-top:14px">
+          💡 לחלופין, כשמריצים עם השרת המקומי, אפשר להגדיר את המפתחות בקובץ
+          server-config.json ליד השרת — ואז השדות כאן מתבטלים אוטומטית.
+        </p>
       </div>
     </aside>
   </main>

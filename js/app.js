@@ -3,7 +3,7 @@
 
 // חותמת גרסה — מתעדכנת בכל שינוי שנדחף. מוצגת בכותרת כדי שאפשר יהיה
 // לוודא במבט שהעדכון האחרון כבר הגיע (האתר והאפליקציה מתעדכנים אוטומטית).
-const APP_VERSION = '2026-07-11 · 21';
+const APP_VERSION = '2026-07-11 · 22';
 
 // ---------- מצב האפליקציה ----------
 const DEFAULT_STYLE = {
@@ -1112,9 +1112,23 @@ async function translateText(text, target) {
 // ---------- תרגום עם Gemini ----------
 $('sel-translate-engine').addEventListener('change', () => {
   const engine = $('sel-translate-engine').value;
-  $('gemini-key-group').hidden = engine !== 'gemini';
+  $('gemini-key-hint').hidden = engine !== 'gemini';
   $('local-src-lang-group').hidden = engine !== 'local';
 });
+$('gemini-key-hint').hidden = true;
+
+// חיווי סטטוס מפתחות בטאבי התמלול והתרגום
+function updateKeyStatus() {
+  const el = serverKeys.elevenlabs || ($('input-elevenlabs-key')?.value || '').trim();
+  const gm = serverKeys.gemini || ($('input-gemini-key')?.value || '').trim();
+  $('elevenlabs-key-status').textContent = el
+    ? (serverKeys.elevenlabs ? '✓ מוגדר בשרת' : '✓ מפתח מוגדר') : '✗ עדיין לא הוזן מפתח';
+  $('gemini-key-status').textContent = gm
+    ? (serverKeys.gemini ? '✓ מוגדר בשרת' : '✓ מפתח מוגדר') : '✗ עדיין לא הוזן מפתח';
+}
+$('input-elevenlabs-key').addEventListener('input', updateKeyStatus);
+$('input-gemini-key').addEventListener('input', updateKeyStatus);
+setTimeout(updateKeyStatus, 800);
 $('input-gemini-key').addEventListener('change', () => {
   try { localStorage.setItem('gemini-api-key', $('input-gemini-key').value.trim()); } catch (_) {}
 });
