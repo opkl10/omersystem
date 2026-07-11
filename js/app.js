@@ -1342,10 +1342,15 @@ function detectSilences(dbs, sampleRate, thresholdDb, minDur, pad) {
   const total = mask.length * winSec;
   if (segStart !== null && total - segStart >= minDur) silences.push({ start: segStart, end: total });
 
-  // ריפוד: משאירים שוליים סביב הדיבור משני צידי כל קטע שקט
+  // ריפוד אדפטיבי: בשקט ארוך משאירים שוליים מלאים סביב הדיבור,
+  // ובשקט קצר הריפוד מתכווץ כדי שהקטע עדיין ייחתך ולא ייבלע
   return silences
-    .map(c => ({ start: c.start + pad, end: c.end - pad }))
-    .filter(c => c.end - c.start > 0.1);
+    .map(c => {
+      const len = c.end - c.start;
+      const p = Math.min(pad, Math.max((len - 0.12) / 2, 0));
+      return { start: c.start + p, end: c.end - p };
+    })
+    .filter(c => c.end - c.start > 0.08);
 }
 
 $('sel-silence-mode').addEventListener('change', () => {
