@@ -1,9 +1,8 @@
 name: Deploy to GitHub Pages
 
-# מושבת זמנית מדחיפות: GitHub Pages עדיין לא הופעל בהגדרות הרפוזיטורי,
-# ולכן הריצות נכשלו על כל דחיפה. אחרי הפעלת Pages (Settings ← Pages ←
-# Source: GitHub Actions) יש להחזיר את טריגר ה-push או להריץ ידנית.
 on:
+  push:
+    branches: [claude/subtitle-system-fonts-effects-qgdv6h]
   workflow_dispatch:
 
 permissions:
