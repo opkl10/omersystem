@@ -1,6 +1,10 @@
 /* ===== מערכת כתוביות — לוגיקה ===== */
 'use strict';
 
+// חותמת גרסה — מתעדכנת בכל שינוי שנדחף. מוצגת בכותרת כדי שאפשר יהיה
+// לוודא במבט שהעדכון האחרון כבר הגיע (האתר והאפליקציה מתעדכנים אוטומטית).
+const APP_VERSION = '2026-07-11 · 21';
+
 // ---------- מצב האפליקציה ----------
 const DEFAULT_STYLE = {
   fontFamily: 'Arial',
@@ -2373,6 +2377,8 @@ setInterval(() => {
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
+
+$('app-version').textContent = APP_VERSION;
 
 populateFontSelect();
 renderFontLists();

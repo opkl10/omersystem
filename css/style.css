@@ -465,3 +465,11 @@ body {
   .edit-panel { width: 100%; border-inline-start: none; border-top: 1px solid var(--border); }
   .video-container { min-height: 240px; flex: none; height: 40vh; }
 }
+
+/* ===== חותמת גרסה ===== */
+.app-version {
+  font-size: 0.65rem;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-inline-start: 8px;
+}
