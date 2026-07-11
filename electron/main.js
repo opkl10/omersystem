@@ -4,6 +4,18 @@
 const { app, BrowserWindow, shell } = require('electron');
 const path = require('path');
 
+// עדכון אוטומטי מרחוק: האפליקציה טוענת קודם את הגרסה העדכנית מהאינטרנט
+// (GitHub Pages — מתעדכנת בכל דחיפת קוד), ואם אין חיבור — הגרסה המובנית בדיסק.
+const REMOTE_URL = 'https://opkl10.github.io/omersystem/';
+
+async function loadApp(win) {
+  try {
+    await win.loadURL(REMOTE_URL);
+  } catch (_) {
+    await win.loadFile(path.join(__dirname, '..', 'index.html'));
+  }
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1440,
@@ -18,7 +30,7 @@ function createWindow() {
     },
   });
 
-  win.loadFile(path.join(__dirname, '..', 'index.html'));
+  loadApp(win);
   win.setMenuBarVisibility(false);
 
   // קישורים חיצוניים נפתחים בדפדפן, לא בתוך האפליקציה
