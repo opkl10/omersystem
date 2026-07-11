@@ -1107,7 +1107,9 @@ async function translateText(text, target) {
 
 // ---------- תרגום עם Gemini ----------
 $('sel-translate-engine').addEventListener('change', () => {
-  $('gemini-key-group').hidden = $('sel-translate-engine').value !== 'gemini';
+  const engine = $('sel-translate-engine').value;
+  $('gemini-key-group').hidden = engine !== 'gemini';
+  $('local-src-lang-group').hidden = engine !== 'local';
 });
 $('input-gemini-key').addEventListener('change', () => {
   try { localStorage.setItem('gemini-api-key', $('input-gemini-key').value.trim()); } catch (_) {}
@@ -1171,6 +1173,88 @@ async function translateAllWithGemini(subs, target, mode, status) {
   return done;
 }
 
+// ---------- תרגום מקומי לגמרי (NLLB בדפדפן) ----------
+const LOCAL_TRANSLATE_MODEL = window.LOCAL_TRANSLATE_MODEL || 'Xenova/nllb-200-distilled-600M';
+
+const NLLB_CODES = {
+  he: 'heb_Hebr', en: 'eng_Latn', ar: 'arb_Arab', ru: 'rus_Cyrl', fr: 'fra_Latn',
+  es: 'spa_Latn', de: 'deu_Latn', it: 'ita_Latn', pt: 'por_Latn', 'zh-CN': 'zho_Hans',
+  ja: 'jpn_Jpan', ko: 'kor_Hang', hi: 'hin_Deva', tr: 'tur_Latn', uk: 'ukr_Cyrl', am: 'amh_Ethi',
+};
+
+// זיהוי שפת מקור לפי הכתב של הטקסט
+function detectSrcLang(text) {
+  if (/[\u0590-\u05FF]/.test(text)) return 'he';
+  if (/[\u0600-\u06FF]/.test(text)) return 'ar';
+  if (/[\u0400-\u04FF]/.test(text)) return 'ru';
+  if (/[\u4E00-\u9FFF]/.test(text)) return 'zh-CN';
+  if (/[\u3040-\u30FF]/.test(text)) return 'ja';
+  if (/[\uAC00-\uD7AF]/.test(text)) return 'ko';
+  return 'en';
+}
+
+let localTranslatorPromise = null;
+
+async function getLocalTranslator(statusEl) {
+  if (localTranslatorPromise) return localTranslatorPromise;
+  localTranslatorPromise = (async () => {
+    const { pipeline } = await loadTransformersLib();
+    const fileProgress = {};
+    const wrap = $('translate-progress-wrap');
+    wrap.hidden = false;
+    try {
+      return await pipeline('translation', LOCAL_TRANSLATE_MODEL, {
+        quantized: true,
+        progress_callback: (p) => {
+          if (p.status === 'progress' && p.total) {
+            fileProgress[p.file] = { loaded: p.loaded, total: p.total };
+            let loaded = 0, total = 0;
+            for (const f of Object.values(fileProgress)) { loaded += f.loaded; total += f.total; }
+            statusEl.textContent = `מוריד את מודל התרגום (חד־פעמי)... ${(loaded / 1048576).toFixed(0)}MB / ${(total / 1048576).toFixed(0)}MB`;
+            $('translate-progress').style.width = (total ? Math.round(loaded / total * 100) : 0) + '%';
+          }
+        },
+      });
+    } finally {
+      wrap.hidden = true;
+    }
+  })().catch(err => {
+    localTranslatorPromise = null;
+    throw err;
+  });
+  return localTranslatorPromise;
+}
+
+async function translateAllWithLocal(subs, target, mode, status) {
+  const tgtCode = NLLB_CODES[target];
+  if (!tgtCode) throw new Error('השפה הזו לא נתמכת בתרגום המקומי');
+  status.textContent = 'טוען את מודל התרגום המקומי...';
+  const translator = await getLocalTranslator(status);
+
+  const srcSetting = $('sel-local-src-lang').value;
+  let done = 0;
+  for (const sub of subs) {
+    status.textContent = `מתרגם מקומית... ${done + 1} מתוך ${subs.length}`;
+    // סימוני הדגשה ושבירות שורה משבשים את המודל — מתרגמים טקסט נקי
+    const plain = sub.text.replace(/\*/g, '').replace(/\n/g, ' ').trim();
+    if (!plain) { done++; continue; }
+    const src = srcSetting === 'auto' ? detectSrcLang(plain) : srcSetting;
+    const out = await translator(plain, {
+      src_lang: NLLB_CODES[src] || 'eng_Latn',
+      tgt_lang: tgtCode,
+    });
+    const translated = (out[0]?.translation_text || '').trim();
+    if (translated) {
+      sub.text = (mode === 'append') ? sub.text + '\n' + translated : translated;
+    }
+    done++;
+    renderSubtitleList();
+    renderTimeline();
+    renderOverlay(true);
+  }
+  return done;
+}
+
 let translating = false;
 
 async function translateSubtitles(subs) {
@@ -1185,6 +1269,21 @@ async function translateSubtitles(subs) {
 
   const target = $('sel-target-lang').value;
   const mode = document.querySelector('input[name="translate-mode"]:checked').value;
+
+  if ($('sel-translate-engine').value === 'local') {
+    try {
+      const done = await translateAllWithLocal(queue, target, mode, status);
+      status.textContent = `✅ תורגמו ${done} כתוביות במנוע המקומי — בלי לצאת מהמחשב.`;
+    } catch (err) {
+      status.textContent = '❌ התרגום המקומי נכשל: ' + (err.message || err) +
+        ' — להורדת המודל בפעם הראשונה נדרש חיבור לאינטרנט.';
+    } finally {
+      translating = false;
+      $('btn-translate-all').disabled = false;
+      $('btn-translate-selected').disabled = false;
+    }
+    return;
+  }
 
   if ($('sel-translate-engine').value === 'gemini') {
     try {

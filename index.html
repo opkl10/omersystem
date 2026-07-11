@@ -216,7 +216,27 @@
           <select id="sel-translate-engine">
             <option value="free" selected>חינמי (Google Translate + MyMemory)</option>
             <option value="gemini">Gemini — איכותי יותר, דורש מפתח API חינמי</option>
+            <option value="local">מקומי — בלי אינטרנט (הורדת מודל חד־פעמית ~900MB)</option>
           </select>
+        </div>
+
+        <div class="form-group" id="local-src-lang-group" hidden>
+          <label for="sel-local-src-lang">שפת המקור של הכתוביות</label>
+          <select id="sel-local-src-lang">
+            <option value="auto" selected>זיהוי אוטומטי (לפי הכתב)</option>
+            <option value="he">עברית</option>
+            <option value="en">אנגלית</option>
+            <option value="ar">ערבית</option>
+            <option value="ru">רוסית</option>
+            <option value="fr">צרפתית</option>
+            <option value="es">ספרדית</option>
+            <option value="de">גרמנית</option>
+          </select>
+          <p class="hint">המודל רץ כולו במחשב שלכם — בפעם הראשונה יורד מודל תרגום (חד־פעמי), ואחר כך עובד גם בלי אינטרנט.</p>
+        </div>
+
+        <div class="progress-bar" id="translate-progress-wrap" hidden role="progressbar" aria-label="התקדמות הורדת מודל התרגום">
+          <div class="progress-fill" id="translate-progress"></div>
         </div>
 
         <div class="form-group" id="gemini-key-group" hidden>
