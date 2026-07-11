@@ -1,0 +1,16 @@
+{
+  "name": "מערכת כתוביות",
+  "short_name": "כתוביות",
+  "description": "עורך כתוביות: תמלול, תרגום, עיצוב, חיתוך שקט וייצוא וידאו",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "dir": "rtl",
+  "lang": "he",
+  "background_color": "#14151a",
+  "theme_color": "#1e2028",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

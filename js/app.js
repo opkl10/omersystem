@@ -1916,20 +1916,33 @@ $('btn-fix-overlaps').addEventListener('click', () => {
     : 'אין חפיפות — הכול תקין.';
 });
 
-async function transcribeWithElevenLabs(status) {
-  const apiKey = $('input-elevenlabs-key').value.trim();
-  if (!apiKey) throw new Error('הזינו מפתח API של ElevenLabs');
+// קידוד מקטע PCM מונו 16kHz ל-WAV (למשלוח מנה של פודקאסט)
+function float32ToWavBlob(samples, sampleRate) {
+  const len = samples.length * 2;
+  const out = new ArrayBuffer(44 + len);
+  const dv = new DataView(out);
+  const wStr = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  wStr(0, 'RIFF'); dv.setUint32(4, 36 + len, true); wStr(8, 'WAVE');
+  wStr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+  dv.setUint16(22, 1, true); dv.setUint32(24, sampleRate, true);
+  dv.setUint32(28, sampleRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+  wStr(36, 'data'); dv.setUint32(40, len, true);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.max(-1, Math.min(1, samples[i]));
+    dv.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+  }
+  return new Blob([out], { type: 'audio/wav' });
+}
 
-  status.textContent = 'מעלה את הקובץ ל-ElevenLabs ומתמלל...';
+async function elevenLabsRequest(fileBlob, apiKey) {
   const form = new FormData();
-  form.append('file', state.mediaFile);
+  form.append('file', fileBlob);
   form.append('model_id', 'scribe_v1');
   form.append('timestamps_granularity', 'word');
   if ($('chk-diarize').checked) form.append('diarize', 'true');
   const lang = $('sel-speech-lang').value;
   if (lang !== 'auto') form.append('language_code', lang);
 
-  // בלי timeout קצר: העלאה ותמלול של סרטון ארוך (עד שעה ויותר) לוקחים דקות
   const res = await fetchWithTimeout('https://api.elevenlabs.io/v1/speech-to-text', 30 * 60 * 1000, {
     method: 'POST',
     headers: { 'xi-api-key': apiKey },
@@ -1941,7 +1954,44 @@ async function transcribeWithElevenLabs(status) {
     try { detail = (await res.json()).detail?.message || detail; } catch (_) {}
     throw new Error(detail);
   }
-  const data = await res.json();
+  return await res.json();
+}
+
+// מצב פודקאסט: חלוקת האודיו למנות של 10 דקות, תמלול כל מנה בנפרד
+// עם מד התקדמות, ואיחוד המילים עם היסט הזמן הנכון
+async function transcribeLongWithElevenLabs(apiKey, status) {
+  const CHUNK_SEC = 600;
+  const SR = 16000;
+  const audio = await getAudioData();
+  const chunks = Math.max(1, Math.ceil(audio.length / (CHUNK_SEC * SR)));
+  const allWords = [];
+  for (let i = 0; i < chunks; i++) {
+    status.textContent = `🎧 מצב פודקאסט: מתמלל מנה ${i + 1} מתוך ${chunks} (כ-10 דקות למנה)...`;
+    setTranscribeProgress(i / chunks);
+    const seg = audio.subarray(i * CHUNK_SEC * SR, Math.min((i + 1) * CHUNK_SEC * SR, audio.length));
+    const data = await elevenLabsRequest(float32ToWavBlob(seg, SR), apiKey);
+    const offset = i * CHUNK_SEC;
+    for (const w of (data.words || [])) {
+      if (w.start != null) w.start += offset;
+      if (w.end != null) w.end += offset;
+      allWords.push(w);
+    }
+  }
+  setTranscribeProgress(null);
+  const maxWords = transcribeGranularity() || 10;
+  return wordsToSubtitles(allWords, maxWords);
+}
+
+async function transcribeWithElevenLabs(status) {
+  const apiKey = $('input-elevenlabs-key').value.trim();
+  if (!apiKey) throw new Error('הזינו מפתח API של ElevenLabs');
+
+  if ($('chk-podcast-mode').checked) {
+    return await transcribeLongWithElevenLabs(apiKey, status);
+  }
+
+  status.textContent = 'מעלה את הקובץ ל-ElevenLabs ומתמלל...';
+  const data = await elevenLabsRequest(state.mediaFile, apiKey);
   const maxWords = transcribeGranularity() || 10;
   if (data.words && data.words.length) return wordsToSubtitles(data.words, maxWords);
   if (data.text && data.text.trim()) {
@@ -2126,7 +2176,78 @@ function renderAll() {
   updateTimeUI();
 }
 
+// ---------- זיכרון אוטומטי: העבודה נשמרת מקומית ומשוחזרת בפתיחה ----------
+const AUTOSAVE_KEY = 'subtitle-editor-autosave';
+let lastAutosave = '';
+
+function snapshotProject() {
+  return JSON.stringify({
+    version: 2,
+    subtitles: state.subtitles,
+    globalStyle: state.globalStyle,
+    customFonts: state.customFonts,
+    cuts: state.cuts,
+    speakers: state.speakers,
+    nextId: state.nextId,
+  });
+}
+
+async function restoreAutosave() {
+  let raw = null;
+  try { raw = localStorage.getItem(AUTOSAVE_KEY); } catch (_) {}
+  if (!raw) return;
+  try {
+    const data = JSON.parse(raw);
+    if (!data.subtitles || !data.subtitles.length) return;
+    state.subtitles = data.subtitles.map(s => ({
+      id: s.id, start: s.start, end: s.end, text: s.text || '',
+      style: s.style ? { ...DEFAULT_STYLE, ...s.style } : null,
+      speaker: s.speaker || null,
+    }));
+    state.globalStyle = { ...DEFAULT_STYLE, ...(data.globalStyle || {}) };
+    state.cuts = Array.isArray(data.cuts) ? data.cuts : [];
+    state.speakers = data.speakers || {};
+    state.nextId = data.nextId || state.subtitles.reduce((m, s) => Math.max(m, s.id || 0), 0) + 1;
+    for (const f of (data.customFonts || [])) {
+      try {
+        await loadCustomFont(f.name, f.dataUrl);
+        state.customFonts.push(f);
+      } catch (_) {}
+    }
+    lastAutosave = raw;
+    populateFontSelect();
+    renderFontLists();
+    renderAll();
+    syncStylePanel();
+    renderSpeakersUI(Object.keys(state.speakers).length > 1);
+    $('subtitles-status').textContent = '💾 העבודה הקודמת שוחזרה אוטומטית (' + state.subtitles.length + ' כתוביות). טענו את קובץ הווידאו כדי להמשיך.';
+  } catch (_) { /* שחזור נכשל — מתחילים נקי */ }
+}
+
+setInterval(() => {
+  const snap = snapshotProject();
+  if (snap === lastAutosave) return;
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, snap);
+    lastAutosave = snap;
+  } catch (_) {
+    // מכסת האחסון מלאה (בדרך כלל פונטים כבדים) — שומרים בלי הפונטים
+    try {
+      const slim = JSON.parse(snap);
+      slim.customFonts = [];
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(slim));
+      lastAutosave = snap;
+    } catch (_) {}
+  }
+}, 2500);
+
+// ---------- Service Worker: התקנה כאפליקציה ועבודה לא-מקוונת ----------
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
 populateFontSelect();
 renderFontLists();
 syncStylePanel();
 renderAll();
+restoreAutosave();

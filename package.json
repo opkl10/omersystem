@@ -1,0 +1,16 @@
+{
+  "name": "subtitle-editor",
+  "productName": "מערכת כתוביות",
+  "version": "1.0.0",
+  "description": "עורך כתוביות: תמלול, תרגום, עיצוב, חיתוך שקט וייצוא וידאו",
+  "main": "electron/main.js",
+  "scripts": {
+    "app": "electron .",
+    "build-mac": "electron-packager . SubtitleEditor --platform=darwin --arch=arm64 --out=dist --overwrite",
+    "build-mac-intel": "electron-packager . SubtitleEditor --platform=darwin --arch=x64 --out=dist --overwrite"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-packager": "^17.1.2"
+  }
+}
