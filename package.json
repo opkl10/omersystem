@@ -3,14 +3,45 @@
   "productName": "מערכת כתוביות",
   "version": "1.0.0",
   "description": "עורך כתוביות: תמלול, תרגום, עיצוב, חיתוך שקט וייצוא וידאו",
+  "author": "opkl10",
   "main": "electron/main.js",
   "scripts": {
     "app": "electron .",
+    "dmg": "electron-builder --mac dmg --publish never",
     "build-mac": "electron-packager . SubtitleEditor --platform=darwin --arch=arm64 --out=dist --overwrite",
     "build-mac-intel": "electron-packager . SubtitleEditor --platform=darwin --arch=x64 --out=dist --overwrite"
   },
   "devDependencies": {
     "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "com.omersystem.subtitle-editor",
+    "productName": "SubtitleEditor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "index.html",
+      "css/**",
+      "js/**",
+      "icons/**",
+      "electron/**",
+      "manifest.webmanifest",
+      "sw.js",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.video",
+      "icon": "build/icon.png",
+      "target": [
+        { "target": "dmg", "arch": ["arm64", "x64"] }
+      ]
+    },
+    "dmg": {
+      "title": "מערכת כתוביות",
+      "artifactName": "SubtitleEditor-${arch}.${ext}"
+    }
   }
 }
