@@ -3,7 +3,7 @@
 
 // חותמת גרסה — מתעדכנת בכל שינוי שנדחף. מוצגת בכותרת כדי שאפשר יהיה
 // לוודא במבט שהעדכון האחרון כבר הגיע (האתר והאפליקציה מתעדכנים אוטומטית).
-const APP_VERSION = '2026-07-11 · 22';
+const APP_VERSION = '2026-07-11 · 23';
 
 // ---------- מצב האפליקציה ----------
 const DEFAULT_STYLE = {
@@ -2049,6 +2049,21 @@ function fixOverlaps() {
   }
   return fixed;
 }
+
+// החלת המרווחים (מהגדרות טאב התמלול) על הכתוביות הקיימות —
+// שימושי גם אחרי עריכה ידנית או ייבוא, לא רק בתמלול
+$('btn-apply-gaps').addEventListener('click', () => {
+  if (!state.subtitles.length) {
+    $('subtitles-status').textContent = 'אין כתוביות להחלת מרווחים.';
+    return;
+  }
+  sortSubtitles();
+  applyGaps(state.subtitles);
+  fixOverlaps();
+  renderAll();
+  $('subtitles-status').textContent =
+    '✅ הוחלו מרווחים בין הכתוביות (לפי ההגדרות בטאב התמלול: מרווח בין מילים, אחרי משפט, ומיקום ההפסקה).';
+});
 
 $('btn-fix-overlaps').addEventListener('click', () => {
   const fixed = fixOverlaps();

@@ -1,1 +1,1 @@
-build 4 - self-update from raw
+build 5 - in-app update check
