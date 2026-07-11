@@ -16,10 +16,19 @@ jobs:
           node-version: 20
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-      - name: Build DMG (unsigned)
+      - name: Build app bundles
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npx electron-builder --mac dmg --publish never
+        run: npx electron-builder --mac dir --arm64 --x64 --publish never
+      - name: Ad-hoc sign (prevents "damaged" Gatekeeper error)
+        run: |
+          codesign --force --deep --sign - "dist/mac-arm64/SubtitleEditor.app"
+          codesign --force --deep --sign - "dist/mac/SubtitleEditor.app"
+          codesign --verify --verbose "dist/mac-arm64/SubtitleEditor.app"
+      - name: Create DMGs
+        run: |
+          hdiutil create -volname "SubtitleEditor" -srcfolder "dist/mac-arm64/SubtitleEditor.app" -ov -format UDZO "dist/SubtitleEditor-AppleSilicon.dmg"
+          hdiutil create -volname "SubtitleEditor" -srcfolder "dist/mac/SubtitleEditor.app" -ov -format UDZO "dist/SubtitleEditor-Intel.dmg"
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
