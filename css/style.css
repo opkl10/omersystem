@@ -213,6 +213,26 @@ body {
   direction: rtl;
 }
 .timeline-block.selected { background: rgba(79, 124, 255, 0.85); box-shadow: 0 0 0 2px #fff3; }
+.waveform-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.timeline-block .tb-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+}
+.tb-handle-l { left: -2px; }
+.tb-handle-r { right: -2px; }
+.timeline-block { cursor: grab; }
+.timeline-block:active { cursor: grabbing; }
+.subtitle-line { pointer-events: auto; cursor: grab; }
+.subtitle-line:active { cursor: grabbing; }
 .timeline-cut {
   position: absolute;
   top: 0;

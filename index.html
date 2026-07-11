@@ -57,6 +57,7 @@
       <!-- ===== ציר זמן ===== -->
       <div class="timeline-wrapper">
         <div class="timeline" id="timeline">
+          <canvas id="waveform-canvas" class="waveform-canvas"></canvas>
           <div class="timeline-cursor" id="timeline-cursor"></div>
         </div>
       </div>
@@ -71,6 +72,7 @@
         <button class="tab" data-tab="translate">תרגום</button>
         <button class="tab" data-tab="transcribe">תמלול</button>
         <button class="tab" data-tab="cuts">חיתוך</button>
+        <button class="tab" data-tab="dub">דיבוב</button>
       </div>
 
       <!-- --- טאב כתוביות --- -->
@@ -169,6 +171,7 @@
             <option value="none">ללא</option>
             <option value="fade">עמעום (Fade)</option>
             <option value="typewriter">מכונת כתיבה</option>
+            <option value="karaoke">קריוקי — המילה הנאמרת נצבעת</option>
             <option value="slide-up">החלקה מלמטה</option>
             <option value="slide-down">החלקה מלמעלה</option>
             <option value="zoom">זום פנימה</option>
@@ -378,6 +381,55 @@
             <option value="flash">הבזק לבן</option>
             <option value="zoom">זום קצר</option>
           </select>
+        </div>
+      </div>
+
+      <!-- --- טאב דיבוב --- -->
+      <div class="tab-content" id="tab-dub">
+        <p class="hint" style="margin-bottom:12px">
+          הקראת הכתוביות בקול AI טבעי (ElevenLabs) — למשל אחרי תרגום, ליצירת סרטון מדובב.
+          כל כתובית מוקראת ומונחת בנקודת הזמן שלה.
+        </p>
+
+        <div class="form-group">
+          <label>מפתח API של ElevenLabs</label>
+          <input type="password" id="input-elevenlabs-key-dub" placeholder="sk_..." autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label>קול</label>
+          <div style="display:flex; gap:8px">
+            <select id="sel-dub-voice" style="flex:1"><option value="">— טענו קולות —</option></select>
+            <button id="btn-load-voices" class="btn">טעינה</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>מודל קול</label>
+          <select id="sel-dub-model">
+            <option value="eleven_v3" selected>Eleven v3 — 70+ שפות כולל עברית</option>
+            <option value="eleven_multilingual_v2">Multilingual v2 — 29 שפות (בלי עברית)</option>
+            <option value="eleven_flash_v2_5">Flash v2.5 — מהיר וזול</option>
+          </select>
+        </div>
+
+        <div class="translate-actions">
+          <button id="btn-generate-dub" class="btn btn-primary">🎤 יצירת דיבוב מהכתוביות</button>
+        </div>
+        <div class="progress-bar" id="dub-progress-wrap" hidden>
+          <div class="progress-fill" id="dub-progress"></div>
+        </div>
+        <p id="dub-status" class="hint"></p>
+
+        <div id="dub-result" hidden>
+          <div class="translate-actions">
+            <button id="btn-preview-dub" class="btn">▶️ האזנה לדיבוב</button>
+            <button id="btn-download-dub" class="btn">⬇️ הורדת קובץ האודיו (WAV)</button>
+          </div>
+          <label class="checkbox-row" style="margin-top:10px">
+            <input type="checkbox" id="chk-use-dubbing" checked>
+            שימוש בדיבוב במקום האודיו המקורי בייצוא הווידאו
+          </label>
         </div>
       </div>
     </aside>

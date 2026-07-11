@@ -36,6 +36,8 @@ const state = {
   duration: 0,
   hasMedia: false,
   cuts: [],               // קטעים שקטים למחיקה: { start, end }
+  audioData: null,        // מטמון PCM 16kHz של האודיו (לגל קול, שקט, תמלול)
+  dubBuffer: null,        // פס דיבוב שנוצר עם ElevenLabs
 };
 
 // ---------- אלמנטים ----------
@@ -201,8 +203,9 @@ function renderSubtitleList() {
 
 // ---------- ציר זמן ----------
 function timelineDuration() {
-  const lastEnd = state.subtitles.reduce((m, s) => Math.max(m, s.end), 0);
-  return Math.max(state.duration, lastEnd, 10);
+  const lastEnd = state.subtitles.reduce((m, s) => Math.max(m, s.end || 0), 0);
+  const dur = isFinite(state.duration) ? state.duration : 0;
+  return Math.max(dur, lastEnd, 10);
 }
 
 function renderTimeline() {
@@ -222,9 +225,16 @@ function renderTimeline() {
     block.style.left = (sub.start / dur * 100) + '%';
     block.style.width = Math.max((sub.end - sub.start) / dur * 100, 0.5) + '%';
     block.textContent = sub.text;
-    block.title = `${formatTime(sub.start)} → ${formatTime(sub.end)}\n${sub.text}`;
+    block.title = `${formatTime(sub.start)} → ${formatTime(sub.end)}\nגרירה = הזזה, קצוות = שינוי משך`;
+    const hl = document.createElement('div');
+    hl.className = 'tb-handle tb-handle-l';
+    const hr = document.createElement('div');
+    hr.className = 'tb-handle tb-handle-r';
+    block.append(hl, hr);
+    block.addEventListener('mousedown', (e) => startBlockDrag(e, sub, block));
     block.addEventListener('click', (e) => {
       e.stopPropagation();
+      if (blockDragMoved) return;
       selectSubtitle(sub.id);
       seekTo(sub.start);
     });
@@ -238,10 +248,55 @@ function updateTimelineCursor() {
 }
 
 timelineEl.addEventListener('click', (e) => {
+  if (blockDragMoved) return;
   const rect = timelineEl.getBoundingClientRect();
   const frac = (e.clientX - rect.left) / rect.width;
   seekTo(frac * timelineDuration());
 });
+
+// ---------- גרירת בלוקים על ציר הזמן ----------
+let blockDragMoved = false;
+
+function startBlockDrag(e, sub, block) {
+  if (exportingVideo || !isFinite(timelineDuration())) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const mode = e.target.classList.contains('tb-handle-l') ? 'start'
+    : e.target.classList.contains('tb-handle-r') ? 'end' : 'move';
+  const rect = timelineEl.getBoundingClientRect();
+  const dur = timelineDuration();
+  const x0 = e.clientX;
+  const orig = { start: sub.start, end: sub.end };
+  blockDragMoved = false;
+  selectSubtitle(sub.id);
+
+  const onMove = (ev) => {
+    const dt = (ev.clientX - x0) / rect.width * dur;
+    if (Math.abs(ev.clientX - x0) > 2) blockDragMoved = true;
+    if (mode === 'move') {
+      const len = orig.end - orig.start;
+      sub.start = Math.max(0, Math.min(orig.start + dt, dur - len));
+      sub.end = sub.start + len;
+    } else if (mode === 'start') {
+      sub.start = Math.max(0, Math.min(orig.start + dt, sub.end - 0.2));
+    } else {
+      sub.end = Math.max(sub.start + 0.2, Math.min(orig.end + dt, dur));
+    }
+    block.style.left = (sub.start / dur * 100) + '%';
+    block.style.width = Math.max((sub.end - sub.start) / dur * 100, 0.5) + '%';
+    renderOverlay(true);
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    sortSubtitles();
+    renderAll();
+    // מניעת ה-click שנורה מיד אחרי גרירה
+    setTimeout(() => { blockDragMoved = false; }, 50);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+}
 
 // ---------- שעון פנימי (עובד גם בלי וידאו) ----------
 let clockTime = 0;
@@ -389,6 +444,7 @@ function renderOverlay(force = false) {
 
   if (!force && key === lastActiveKey) {
     updateTypewriters(t);
+    updateKaraoke(t);
     return;
   }
   lastActiveKey = key;
@@ -400,8 +456,10 @@ function renderOverlay(force = false) {
     line.className = 'subtitle-line';
     line.style.top = st.position + '%';
     line.style.setProperty('--fx-dur', st.effectDuration + 's');
+    line.title = 'גרירה למעלה/למטה משנה את מיקום הכתובית';
+    line.addEventListener('mousedown', (e) => startSubtitleDrag(e, sub));
 
-    if (st.effect !== 'none' && st.effect !== 'typewriter') {
+    if (st.effect !== 'none' && st.effect !== 'typewriter' && st.effect !== 'karaoke') {
       line.classList.add('fx-' + st.effect);
     }
 
@@ -430,7 +488,28 @@ function renderOverlay(force = false) {
       if (st.highlightBold) el.style.fontWeight = '700';
     };
 
-    if (st.effect === 'typewriter') {
+    if (st.effect === 'karaoke') {
+      line.classList.add('fx-karaoke');
+      line.dataset.start = sub.start;
+      line.dataset.end = sub.end;
+      line.dataset.hl = st.highlightColor;
+      line.dataset.hlBold = st.highlightBold ? '1' : '';
+      // מילים כיחידות נפרדות; המילה הנוכחית נצבעת לפי ההתקדמות בזמן
+      const plain = displayText.replace(/\*/g, '');
+      const lineTexts = plain.split('\n');
+      lineTexts.forEach((lt, li) => {
+        if (li > 0) span.appendChild(document.createTextNode('\n'));
+        lt.split(/\s+/).filter(Boolean).forEach((w, wi, arr) => {
+          const wSpan = document.createElement('span');
+          wSpan.className = 'kar-word';
+          wSpan.textContent = w;
+          wSpan.style.padding = '0';
+          wSpan.style.borderRadius = '0';
+          span.appendChild(wSpan);
+          if (wi < arr.length - 1) span.appendChild(document.createTextNode(' '));
+        });
+      });
+    } else if (st.effect === 'typewriter') {
       line.classList.add('fx-typewriter');
       line.dataset.subId = sub.id;
       line.dataset.start = sub.start;
@@ -461,6 +540,49 @@ function renderOverlay(force = false) {
     overlay.appendChild(line);
   }
   updateTypewriters(t);
+  updateKaraoke(t);
+}
+
+function updateKaraoke(t) {
+  overlay.querySelectorAll('.fx-karaoke').forEach(line => {
+    const start = Number(line.dataset.start);
+    const end = Number(line.dataset.end);
+    const words = line.querySelectorAll('.kar-word');
+    if (!words.length) return;
+    const progress = Math.min(Math.max((t - start) / Math.max(end - start, 0.001), 0), 1);
+    const idx = Math.min(words.length - 1, Math.floor(progress * words.length));
+    words.forEach((w, i) => {
+      if (i <= idx) {
+        w.style.color = line.dataset.hl;
+        if (line.dataset.hlBold) w.style.fontWeight = '700';
+      } else {
+        w.style.color = '';
+        w.style.fontWeight = '';
+      }
+    });
+  });
+}
+
+// גרירת כתובית על הווידאו — שינוי המיקום האנכי בעיצוב המתאים (מותאם או גלובלי)
+function startSubtitleDrag(e, sub) {
+  if (exportingVideo) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const container = $('video-container').getBoundingClientRect();
+  const target = sub.style || state.globalStyle;
+
+  const onMove = (ev) => {
+    const pos = Math.round(Math.max(5, Math.min(95, (ev.clientY - container.top) / container.height * 100)));
+    target.position = pos;
+    renderOverlay(true);
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    syncStylePanel();
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
 }
 
 function updateTypewriters(t) {
@@ -697,7 +819,48 @@ function loadVideoFile(file) {
   video.src = url;
   state.hasMedia = true;
   state.mediaFile = file;
+  state.audioData = null;
+  state.dubBuffer = null;
   $('video-placeholder').classList.add('hidden');
+  buildWaveform();
+}
+
+// מטמון האודיו — משמש את גל הקול, זיהוי השקט והתמלול בלי לפענח שוב ושוב
+async function getAudioData() {
+  if (!state.audioData) state.audioData = await extractAudio(state.mediaFile);
+  return state.audioData;
+}
+
+// ---------- גל קול על ציר הזמן ----------
+async function buildWaveform() {
+  try {
+    const audio = await getAudioData();
+    const canvas = $('waveform-canvas');
+    const buckets = 1200;
+    const peaks = new Float32Array(buckets);
+    const per = Math.max(1, Math.floor(audio.length / buckets));
+    for (let b = 0; b < buckets; b++) {
+      let max = 0;
+      const start = b * per, end = Math.min(start + per, audio.length);
+      for (let i = start; i < end; i += 4) {
+        const v = Math.abs(audio[i]);
+        if (v > max) max = v;
+      }
+      peaks[b] = max;
+    }
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = Math.max(rect.width, 600) * 2;
+    canvas.height = 112;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'rgba(79, 124, 255, 0.35)';
+    const mid = canvas.height / 2;
+    const bw = canvas.width / buckets;
+    for (let b = 0; b < buckets; b++) {
+      const h = Math.max(1, peaks[b] * canvas.height * 0.95);
+      ctx.fillRect(b * bw, mid - h / 2, Math.max(bw - 1, 1), h);
+    }
+  } catch (_) { /* בלי גל קול — לא קריטי */ }
 }
 
 $('input-video').addEventListener('change', (e) => {
@@ -708,6 +871,18 @@ $('input-video-2').addEventListener('change', (e) => {
 });
 
 video.addEventListener('loadedmetadata', () => {
+  if (!isFinite(video.duration)) {
+    // קבצים שהוקלטו בדפדפן (MediaRecorder) מדווחים משך אינסופי עד שקופצים לסוף —
+    // קפיצה לזמן עצום מאלצת את הדפדפן לחשב את המשך האמיתי
+    video.currentTime = 1e7;
+    video.addEventListener('seeked', () => {
+      state.duration = isFinite(video.duration) ? video.duration : 0;
+      video.currentTime = 0;
+      renderTimeline();
+      updateTimeUI();
+    }, { once: true });
+    return;
+  }
   state.duration = video.duration;
   renderTimeline();
   updateTimeUI();
@@ -1117,7 +1292,7 @@ async function detectSilencesInMedia() {
   $('btn-detect-silence').disabled = true;
   status.textContent = 'מנתח את האודיו...';
   try {
-    const audio = await extractAudio(state.mediaFile);
+    const audio = await getAudioData();
     const dbs = windowLevelsDb(audio, 16000);
 
     let thresholdDb;
@@ -1225,6 +1400,16 @@ function drawSubtitlesOnCanvas(ctx, W, H, t, scale) {
       charBudget = Math.ceil(visFrac * totalChars);
     }
 
+    // קריוקי: אינדקס המילה הנוכחית לפי ההתקדמות במשך הכתובית
+    let karaokeIdx = -1;
+    let karaokeCounter = 0;
+    if (st.effect === 'karaoke') {
+      const totalWords = lines.reduce((n, segs) =>
+        n + segs.reduce((m, s) => m + s.text.split(/\s+/).filter(Boolean).length, 0), 0);
+      const progress = Math.min(Math.max((t - sub.start) / Math.max(sub.end - sub.start, 0.001), 0), 1);
+      karaokeIdx = Math.min(totalWords - 1, Math.floor(progress * totalWords));
+    }
+
     const centerX = W / 2 + offX;
     const centerY = st.position / 100 * H + offY;
     const totalH = lines.length * lineH;
@@ -1278,9 +1463,10 @@ function drawSubtitlesOnCanvas(ctx, W, H, t, scale) {
           drawText = charBudget <= 0 ? '' : tok.w.slice(0, charBudget);
           charBudget -= tok.w.length + 1; // כולל הרווח שאחרי המילה
         }
+        const isKaraokeHl = st.effect === 'karaoke' && karaokeCounter++ <= karaokeIdx;
         if (drawText) {
-          ctx.font = segFont(tok.hl);
-          const color = tok.hl ? st.highlightColor : (colorOverride || st.textColor);
+          ctx.font = segFont(tok.hl || isKaraokeHl);
+          const color = (tok.hl || isKaraokeHl) ? st.highlightColor : (colorOverride || st.textColor);
           if (shadowBlur > 0) {
             ctx.shadowColor = color;
             ctx.shadowBlur = shadowBlur;
@@ -1323,6 +1509,17 @@ async function exportVideoWithSubtitles() {
   const scale = H / (overlay.clientHeight || 540);
 
   const stream = canvas.captureStream(30);
+  const useDub = !!(state.dubBuffer && $('chk-use-dubbing').checked && !$('dub-result').hidden);
+  let dubSource = null;
+  let dubDest = null;
+  const startDubAt = (offset) => {
+    if (dubSource) { try { dubSource.stop(); } catch (_) {} }
+    dubSource = exportAudioCtx.createBufferSource();
+    dubSource.buffer = state.dubBuffer;
+    dubSource.connect(dubDest);
+    dubSource.start(0, Math.min(offset, state.dubBuffer.duration - 0.01));
+  };
+  const wasMuted = video.muted;
   try {
     if (!exportAudioCtx) {
       exportAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1331,7 +1528,13 @@ async function exportVideoWithSubtitles() {
     }
     await exportAudioCtx.resume();
     const dest = exportAudioCtx.createMediaStreamDestination();
-    exportSourceNode.connect(dest);
+    if (useDub) {
+      // דיבוב במקום האודיו המקורי: משתיקים את הווידאו ומזרימים את פס הדיבוב
+      video.muted = true;
+      dubDest = dest;
+    } else {
+      exportSourceNode.connect(dest);
+    }
     const audioTrack = dest.stream.getAudioTracks()[0];
     if (audioTrack) stream.addTrack(audioTrack);
   } catch (_) { /* ממשיכים בלי אודיו */ }
@@ -1363,6 +1566,8 @@ async function exportVideoWithSubtitles() {
     exportRecorder = null;
     $('btn-export-video').disabled = false;
     $('export-video-bar').hidden = true;
+    if (dubSource) { try { dubSource.stop(); } catch (_) {} dubSource = null; }
+    video.muted = wasMuted;
     video.pause();
     updatePlayButton();
   };
@@ -1382,6 +1587,7 @@ async function exportVideoWithSubtitles() {
 
   exportRecorder.start(1000);
   await video.play();
+  if (useDub) startDubAt(0);
   updatePlayButton();
 
   const drawLoop = () => {
@@ -1392,6 +1598,7 @@ async function exportVideoWithSubtitles() {
     const cut = activeCutAt(t);
     if (cut && cut.end < video.duration - 0.1) {
       video.currentTime = cut.end + 0.01;
+      if (useDub) startDubAt(cut.end + 0.01); // סנכרון פס הדיבוב לקפיצה
     } else if (cut) {
       // הקטע השקט מגיע עד סוף הסרטון — מסיימים כאן
       if (exportRecorder.state !== 'inactive') exportRecorder.stop();
@@ -1634,7 +1841,7 @@ async function transcribeVideo() {
 
       status.textContent = 'מחלץ אודיו מהסרטון...';
       setTranscribeProgress(null);
-      const audio = await extractAudio(state.mediaFile);
+      const audio = await getAudioData();
 
       status.textContent = 'מתמלל... (בסרטון ארוך זה עשוי לקחת כמה דקות)';
       const lang = $('sel-speech-lang').value;
@@ -1696,6 +1903,186 @@ async function transcribeVideo() {
 }
 
 $('btn-transcribe').addEventListener('click', transcribeVideo);
+
+// ---------- דיבוב עם ElevenLabs ----------
+// שדה המפתח בטאב הדיבוב מסונכרן עם זה שבטאב התמלול (אותו localStorage)
+$('input-elevenlabs-key-dub').addEventListener('change', () => {
+  const v = $('input-elevenlabs-key-dub').value.trim();
+  $('input-elevenlabs-key').value = v;
+  try { localStorage.setItem('elevenlabs-api-key', v); } catch (_) {}
+});
+try {
+  const k = localStorage.getItem('elevenlabs-api-key');
+  if (k) $('input-elevenlabs-key-dub').value = k;
+} catch (_) {}
+
+function elevenLabsKey() {
+  return ($('input-elevenlabs-key-dub').value || $('input-elevenlabs-key').value).trim();
+}
+
+let dubAudioCtx = null;
+function getDubAudioCtx() {
+  if (!dubAudioCtx) dubAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return dubAudioCtx;
+}
+
+async function loadVoices() {
+  const key = elevenLabsKey();
+  const status = $('dub-status');
+  if (!key) { status.textContent = 'הזינו קודם מפתח API של ElevenLabs.'; return; }
+  status.textContent = 'טוען קולות...';
+  try {
+    const res = await fetchWithTimeout('https://api.elevenlabs.io/v1/voices', 20000, {
+      headers: { 'xi-api-key': key },
+    });
+    if (res.status === 401) throw new Error('מפתח ה-API לא תקין');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const sel = $('sel-dub-voice');
+    sel.innerHTML = '';
+    for (const v of (data.voices || [])) {
+      const opt = document.createElement('option');
+      opt.value = v.voice_id;
+      opt.textContent = v.name + (v.labels && v.labels.accent ? ` (${v.labels.accent})` : '');
+      sel.appendChild(opt);
+    }
+    status.textContent = `✅ נטענו ${(data.voices || []).length} קולות. בחרו קול ולחצו על יצירת דיבוב.`;
+  } catch (err) {
+    status.textContent = '❌ טעינת הקולות נכשלה: ' + (err.message || err);
+  }
+}
+$('btn-load-voices').addEventListener('click', loadVoices);
+
+async function ttsClip(text, voiceId, modelId, key) {
+  const res = await fetchWithTimeout(
+    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`,
+    60000,
+    {
+      method: 'POST',
+      headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, model_id: modelId }),
+    });
+  if (res.status === 401) throw new Error('מפתח ה-API לא תקין');
+  if (!res.ok) {
+    let detail = 'HTTP ' + res.status;
+    try { detail = (await res.json()).detail?.message || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  const buf = await res.arrayBuffer();
+  return await getDubAudioCtx().decodeAudioData(buf);
+}
+
+let dubbingInProgress = false;
+
+async function generateDub() {
+  if (dubbingInProgress) return;
+  const status = $('dub-status');
+  const key = elevenLabsKey();
+  if (!key) { status.textContent = 'הזינו קודם מפתח API של ElevenLabs.'; return; }
+  const voiceId = $('sel-dub-voice').value;
+  if (!voiceId) { status.textContent = 'טענו ובחרו קול קודם.'; return; }
+  sortSubtitles();
+  const subs = state.subtitles.filter(s => s.text.trim());
+  if (!subs.length) { status.textContent = 'אין כתוביות להקראה.'; return; }
+
+  dubbingInProgress = true;
+  $('btn-generate-dub').disabled = true;
+  $('dub-progress-wrap').hidden = false;
+  const modelId = $('sel-dub-model').value;
+
+  try {
+    const clips = [];
+    for (let i = 0; i < subs.length; i++) {
+      status.textContent = `מקריא כתובית ${i + 1} מתוך ${subs.length}...`;
+      $('dub-progress').style.width = Math.round(i / subs.length * 100) + '%';
+      const plain = subs[i].text.replace(/\*/g, '').replace(/\n/g, ' ');
+      clips.push({ buffer: await ttsClip(plain, voiceId, modelId, key), at: subs[i].start, sub: subs[i] });
+    }
+
+    status.textContent = 'מרכיב את פס הקול...';
+    $('dub-progress').style.width = '100%';
+    const totalDur = Math.max(timelineDuration(), clips.length ? clips[clips.length - 1].at + clips[clips.length - 1].buffer.duration : 1) + 0.5;
+    const offline = new OfflineAudioContext(1, Math.ceil(totalDur * 44100), 44100);
+    clips.forEach((clip, i) => {
+      const src = offline.createBufferSource();
+      src.buffer = clip.buffer;
+      // אם ההקראה ארוכה מהחלון עד הכתובית הבאה — מאיצים מעט כדי שלא תדרוס אותה
+      const slot = (i < clips.length - 1 ? clips[i + 1].at : totalDur) - clip.at;
+      if (slot > 0.2 && clip.buffer.duration > slot) {
+        src.playbackRate.value = Math.min(1.6, clip.buffer.duration / slot);
+      }
+      src.connect(offline.destination);
+      src.start(clip.at);
+    });
+    state.dubBuffer = await offline.startRendering();
+    $('dub-result').hidden = false;
+    status.textContent = `✅ הדיבוב מוכן (${state.dubBuffer.duration.toFixed(1)} שניות). אפשר להאזין, להוריד, או לייצא וידאו עם הדיבוב.`;
+  } catch (err) {
+    status.textContent = '❌ הדיבוב נכשל: ' + (err.message || err);
+  } finally {
+    dubbingInProgress = false;
+    $('btn-generate-dub').disabled = false;
+    $('dub-progress-wrap').hidden = true;
+  }
+}
+$('btn-generate-dub').addEventListener('click', generateDub);
+
+// האזנה לדיבוב
+let dubPreviewSource = null;
+$('btn-preview-dub').addEventListener('click', () => {
+  const ctx = getDubAudioCtx();
+  if (dubPreviewSource) {
+    try { dubPreviewSource.stop(); } catch (_) {}
+    dubPreviewSource = null;
+    $('btn-preview-dub').textContent = '▶️ האזנה לדיבוב';
+    return;
+  }
+  if (!state.dubBuffer) return;
+  ctx.resume();
+  dubPreviewSource = ctx.createBufferSource();
+  dubPreviewSource.buffer = state.dubBuffer;
+  dubPreviewSource.connect(ctx.destination);
+  dubPreviewSource.onended = () => {
+    dubPreviewSource = null;
+    $('btn-preview-dub').textContent = '▶️ האזנה לדיבוב';
+  };
+  dubPreviewSource.start();
+  $('btn-preview-dub').textContent = '⏹ עצירה';
+});
+
+// קידוד AudioBuffer ל-WAV (PCM16)
+function audioBufferToWav(buffer) {
+  const ch = buffer.numberOfChannels;
+  const sr = buffer.sampleRate;
+  const len = buffer.length * ch * 2;
+  const out = new ArrayBuffer(44 + len);
+  const dv = new DataView(out);
+  const wStr = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+  wStr(0, 'RIFF'); dv.setUint32(4, 36 + len, true); wStr(8, 'WAVE');
+  wStr(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true);
+  dv.setUint16(22, ch, true); dv.setUint32(24, sr, true);
+  dv.setUint32(28, sr * ch * 2, true); dv.setUint16(32, ch * 2, true); dv.setUint16(34, 16, true);
+  wStr(36, 'data'); dv.setUint32(40, len, true);
+  let off = 44;
+  for (let i = 0; i < buffer.length; i++) {
+    for (let c = 0; c < ch; c++) {
+      const v = Math.max(-1, Math.min(1, buffer.getChannelData(c)[i]));
+      dv.setInt16(off, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+      off += 2;
+    }
+  }
+  return out;
+}
+
+$('btn-download-dub').addEventListener('click', () => {
+  if (!state.dubBuffer) return;
+  const blob = new Blob([audioBufferToWav(state.dubBuffer)], { type: 'audio/wav' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'dubbing.wav';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
 
 // ---------- קיצורי מקלדת ----------
 document.addEventListener('keydown', (e) => {
