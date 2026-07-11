@@ -1,1 +1,1 @@
-build 3 - remote autoupdate
+build 4 - self-update from raw

@@ -1,19 +1,58 @@
 // מערכת כתוביות — עטיפת אפליקציה שולחנית (Electron)
-// רץ מקומית לגמרי: הקבצים נטענים מהדיסק, והנתונים (localStorage) נשמרים
-// בתיקיית המשתמש של האפליקציה — העבודה נזכרת בין הפעלות.
-const { app, BrowserWindow, shell } = require('electron');
+//
+// עדכון אוטומטי מרחוק: בכל פתיחה האפליקציה מורידה את קובצי המערכת
+// העדכניים ישירות מהרפוזיטורי ב-GitHub לתיקיית מטמון מקומית וטוענת משם.
+// אם אין אינטרנט — נטען המטמון האחרון, ואם אין כזה — הגרסה המובנית בדיסק.
+// הזיכרון (localStorage) נשמר בתיקיית המשתמש וחי בין עדכונים.
+const { app, BrowserWindow, shell, net } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
-// עדכון אוטומטי מרחוק: האפליקציה טוענת קודם את הגרסה העדכנית מהאינטרנט
-// (GitHub Pages — מתעדכנת בכל דחיפת קוד), ואם אין חיבור — הגרסה המובנית בדיסק.
-const REMOTE_URL = 'https://opkl10.github.io/omersystem/';
+const RAW_BASE = 'https://raw.githubusercontent.com/opkl10/omersystem/claude/subtitle-system-fonts-effects-qgdv6h/';
+const APP_FILES = [
+  'index.html',
+  'css/style.css',
+  'js/app.js',
+  'manifest.webmanifest',
+  'icons/icon-192.png',
+  'icons/icon-512.png',
+];
+
+function cacheDir() {
+  return path.join(app.getPath('userData'), 'app-cache');
+}
+
+// הורדת כל הקבצים; כותבים לדיסק רק אם כולם ירדו תקינים
+async function updateCache() {
+  const results = [];
+  for (const f of APP_FILES) {
+    const res = await net.fetch(RAW_BASE + f, { signal: AbortSignal.timeout(10000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' for ' + f);
+    results.push([f, Buffer.from(await res.arrayBuffer())]);
+  }
+  if (!results[0][1].toString('utf8').includes('מערכת כתוביות')) {
+    throw new Error('unexpected index.html content');
+  }
+  for (const [f, buf] of results) {
+    const p = path.join(cacheDir(), f);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, buf);
+  }
+}
 
 async function loadApp(win) {
   try {
-    await win.loadURL(REMOTE_URL);
-  } catch (_) {
-    await win.loadFile(path.join(__dirname, '..', 'index.html'));
-  }
+    await updateCache();
+  } catch (_) { /* אין רשת או הורדה נכשלה — נשתמש במה שיש */ }
+
+  const cachedIndex = path.join(cacheDir(), 'index.html');
+  try {
+    if (fs.existsSync(cachedIndex)) {
+      await win.loadFile(cachedIndex);
+      return;
+    }
+  } catch (_) { /* מטמון פגום — נופלים לגרסה המובנית */ }
+  await win.loadFile(path.join(__dirname, '..', 'index.html'));
 }
 
 function createWindow() {
