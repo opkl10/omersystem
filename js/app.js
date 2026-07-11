@@ -1125,8 +1125,10 @@ const LANG_NAMES = {
 
 // תרגום קבוצת שורות בבת אחת — Gemini מקבל הקשר מלא ולכן התרגום עקבי יותר
 async function translateBatchWithGemini(texts, target, apiKey) {
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='
-    + encodeURIComponent(apiKey);
+  const url = serverKeys.gemini
+    ? '/api/gemini'
+    : 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key='
+      + encodeURIComponent(apiKey);
   const prompt = 'Translate the following subtitle lines to ' + (LANG_NAMES[target] || target) + '.\n'
     + 'These are consecutive subtitles from one video, so keep the translation consistent across lines.\n'
     + 'Keep any *word* asterisk markers around the same words in the translation.\n'
@@ -1150,8 +1152,8 @@ async function translateBatchWithGemini(texts, target, apiKey) {
 }
 
 async function translateAllWithGemini(subs, target, mode, status) {
-  const apiKey = $('input-gemini-key').value.trim();
-  if (!apiKey) throw new Error('הזינו מפתח API של Gemini (מקבלים בחינם ב-aistudio.google.com)');
+  const apiKey = serverKeys.gemini ? '' : ($('input-gemini-key')?.value || '').trim();
+  if (!apiKey && !serverKeys.gemini) throw new Error('הזינו מפתח API של Gemini (מקבלים בחינם ב-aistudio.google.com)');
   const BATCH = 40;
   let done = 0;
   for (let i = 0; i < subs.length; i += BATCH) {
@@ -1823,6 +1825,29 @@ function splitTranscriptChunk(text, start, end) {
   return out;
 }
 
+// ---------- מפתחות בצד השרת ----------
+// כשהמערכת רצה מהשרת המקומי (server.py) והמפתחות מוגדרים ב-server-config.json,
+// הבקשות עוברות דרך השרת והמשתמש לא צריך להזין מפתח בממשק
+let serverKeys = { elevenlabs: false, gemini: false };
+
+(async function detectServerKeys() {
+  if (!location.protocol.startsWith('http')) return;
+  try {
+    const res = await fetch('/api/has-keys');
+    if (!res.ok) return;
+    serverKeys = await res.json();
+    if (serverKeys.elevenlabs) {
+      const group = $('elevenlabs-key-group');
+      group.innerHTML = '<p class="hint">✓ מפתח ElevenLabs מוגדר בשרת (server-config.json) — אין צורך להזין כאן.</p>';
+    }
+    if (serverKeys.gemini) {
+      const group = $('gemini-key-group');
+      group.innerHTML = '<p class="hint">✓ מפתח Gemini מוגדר בשרת (server-config.json) — אין צורך להזין כאן.</p>';
+      group.hidden = false;
+    }
+  } catch (_) { /* אין שרת עם API — ממשיכים עם מפתחות בממשק */ }
+})();
+
 // ---------- תמלול עם ElevenLabs Scribe ----------
 $('sel-transcribe-engine').addEventListener('change', () => {
   const el = $('sel-transcribe-engine').value === 'elevenlabs';
@@ -1943,11 +1968,15 @@ async function elevenLabsRequest(fileBlob, apiKey) {
   const lang = $('sel-speech-lang').value;
   if (lang !== 'auto') form.append('language_code', lang);
 
-  const res = await fetchWithTimeout('https://api.elevenlabs.io/v1/speech-to-text', 30 * 60 * 1000, {
-    method: 'POST',
-    headers: { 'xi-api-key': apiKey },
-    body: form,
-  });
+  const viaServer = serverKeys.elevenlabs;
+  const res = await fetchWithTimeout(
+    viaServer ? '/api/speech-to-text' : 'https://api.elevenlabs.io/v1/speech-to-text',
+    30 * 60 * 1000,
+    {
+      method: 'POST',
+      headers: viaServer ? {} : { 'xi-api-key': apiKey },
+      body: form,
+    });
   if (res.status === 401) throw new Error('מפתח ה-API לא תקין או שפג תוקפו');
   if (!res.ok) {
     let detail = 'HTTP ' + res.status;
@@ -1983,8 +2012,8 @@ async function transcribeLongWithElevenLabs(apiKey, status) {
 }
 
 async function transcribeWithElevenLabs(status) {
-  const apiKey = $('input-elevenlabs-key').value.trim();
-  if (!apiKey) throw new Error('הזינו מפתח API של ElevenLabs');
+  const apiKey = serverKeys.elevenlabs ? '' : ($('input-elevenlabs-key')?.value || '').trim();
+  if (!apiKey && !serverKeys.elevenlabs) throw new Error('הזינו מפתח API של ElevenLabs');
 
   if ($('chk-podcast-mode').checked) {
     return await transcribeLongWithElevenLabs(apiKey, status);

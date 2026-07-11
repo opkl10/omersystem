@@ -27,6 +27,8 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== location.origin) return;
+  // בקשות API (תמלול/תרגום דרך השרת) לא נכנסות למטמון
+  if (e.request.method !== 'GET' || url.pathname.startsWith('/api/')) return;
   e.respondWith(
     fetch(e.request)
       .then(res => {

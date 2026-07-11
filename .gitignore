@@ -1,0 +1,6 @@
+# מפתחות API אישיים — לא נכנסים ל-git לעולם
+server-config.json
+
+node_modules/
+dist/
+.DS_Store
