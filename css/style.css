@@ -239,9 +239,10 @@ body {
   bottom: 0;
   background: repeating-linear-gradient(45deg, rgba(224,85,85,0.35), rgba(224,85,85,0.35) 4px, transparent 4px, transparent 8px);
   border-inline: 1px solid rgba(224,85,85,0.7);
-  pointer-events: none;
+  cursor: not-allowed;
   z-index: 4;
 }
+.timeline-cut:hover { background: rgba(224,85,85,0.55); }
 .timeline-cursor {
   position: absolute;
   top: 0;

@@ -216,7 +216,13 @@ function renderTimeline() {
     el.className = 'timeline-cut';
     el.style.left = (cut.start / dur * 100) + '%';
     el.style.width = ((cut.end - cut.start) / dur * 100) + '%';
-    el.title = `קטע שקט שיימחק: ${formatTime(cut.start)} → ${formatTime(cut.end)}`;
+    el.title = `קטע שקט שיימחק: ${formatTime(cut.start)} → ${formatTime(cut.end)}\nלחיצה מבטלת את החיתוך הזה`;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      state.cuts = state.cuts.filter(c => c !== cut);
+      $('cuts-status').textContent = 'החיתוך בוטל. נשארו ' + state.cuts.length + ' קטעים למחיקה.';
+      renderTimeline();
+    });
     timelineEl.appendChild(el);
   }
   for (const sub of state.subtitles) {
@@ -1284,22 +1290,58 @@ function autoThresholdDb(dbs) {
   return noiseFloor + (speechLevel - noiseFloor) * 0.35;
 }
 
-// זיהוי קטעים שקטים לפי סף בדציבלים
+// זיהוי קטעים שקטים לפי סף בדציבלים, עם הגנות נגד זיהוי שגוי:
+// החלקת מדיאן (נגד קפיצות רגעיות), היסטרזיס (יציאה משקט רק 4dB מעל הסף),
+// וסגירת הבלחות רעש קצרות בתוך שקט
 function detectSilences(dbs, sampleRate, thresholdDb, minDur, pad) {
   const winSec = 0.05;
+
+  const smooth = dbs.map((d, i) => {
+    const a = dbs[Math.max(0, i - 1)], c = dbs[Math.min(dbs.length - 1, i + 1)];
+    return [a, d, c].sort((x, y) => x - y)[1];
+  });
+
+  const mask = new Array(smooth.length);
+  let silent = false;
+  for (let i = 0; i < smooth.length; i++) {
+    if (silent) {
+      if (smooth[i] > thresholdDb + 4) silent = false;
+    } else if (smooth[i] < thresholdDb) {
+      silent = true;
+    }
+    mask[i] = silent;
+  }
+
+  // הבלחת רעש קצרה מ-0.25s בתוך שקט לא שוברת את הקטע
+  const blip = Math.round(0.25 / winSec);
+  let runStart = null;
+  for (let i = 0; i <= mask.length; i++) {
+    const loud = i < mask.length ? !mask[i] : false;
+    if (loud && runStart === null) runStart = i;
+    else if (!loud && runStart !== null) {
+      const before = runStart > 0 && mask[runStart - 1];
+      const after = i < mask.length && mask[i];
+      if (before && after && i - runStart <= blip) {
+        for (let j = runStart; j < i; j++) mask[j] = true;
+      }
+      runStart = null;
+    }
+  }
+
   const silences = [];
   let segStart = null;
-  for (let i = 0; i < dbs.length; i++) {
+  for (let i = 0; i < mask.length; i++) {
     const t = i * winSec;
-    if (dbs[i] < thresholdDb) {
+    if (mask[i]) {
       if (segStart === null) segStart = t;
     } else if (segStart !== null) {
       if (t - segStart >= minDur) silences.push({ start: segStart, end: t });
       segStart = null;
     }
   }
-  const total = dbs.length * winSec;
+  const total = mask.length * winSec;
   if (segStart !== null && total - segStart >= minDur) silences.push({ start: segStart, end: total });
+
   // ריפוד: משאירים שוליים סביב הדיבור משני צידי כל קטע שקט
   return silences
     .map(c => ({ start: c.start + pad, end: c.end - pad }))
@@ -1829,10 +1871,18 @@ function transcribeGranularity() {
 function applyGaps(pieces) {
   const wordGap = Number($('rng-word-gap').value);
   const sentenceGap = Number($('rng-sentence-gap').value);
+  const placement = $('sel-gap-placement').value;
   for (let i = 0; i < pieces.length - 1; i++) {
     const cur = pieces[i], next = pieces[i + 1];
     const gap = /[.!?…]\s*$/.test(cur.text) ? sentenceGap : wordGap;
-    if (next.start - cur.end < gap) {
+    const missing = gap - (next.start - cur.end);
+    if (missing <= 0) continue;
+    if (placement === 'delay-next') {
+      next.start = Math.min(next.end - 0.25, next.start + missing);
+    } else if (placement === 'split') {
+      cur.end = Math.max(cur.start + 0.25, cur.end - missing / 2);
+      next.start = Math.min(next.end - 0.25, next.start + missing / 2);
+    } else { // trim-prev
       cur.end = Math.max(cur.start + 0.25, next.start - gap);
     }
   }
@@ -1874,7 +1924,8 @@ async function transcribeWithElevenLabs(status) {
   const lang = $('sel-speech-lang').value;
   if (lang !== 'auto') form.append('language_code', lang);
 
-  const res = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+  // בלי timeout קצר: העלאה ותמלול של סרטון ארוך (עד שעה ויותר) לוקחים דקות
+  const res = await fetchWithTimeout('https://api.elevenlabs.io/v1/speech-to-text', 30 * 60 * 1000, {
     method: 'POST',
     headers: { 'xi-api-key': apiKey },
     body: form,
@@ -1988,7 +2039,7 @@ async function transcribeVideo() {
     fixOverlaps();
     sortSubtitles();
     renderAll();
-    renderSpeakersUI(speakerIds.length > 1);
+    renderSpeakersUI(speakerIds.length >= 1);
     status.textContent = `✅ נוצרו ${created.length} כתוביות מהתמלול` +
       (speakerIds.length > 1 ? ` וזוהו ${speakerIds.length} דוברים — הזינו את שמותיהם למטה.` : '.') +
       ' אפשר לערוך בטאב "כתוביות" או לתרגם בטאב "תרגום".';
@@ -2039,8 +2090,12 @@ $('btn-apply-speakers').addEventListener('click', () => {
     const newLabel = input.value.trim() || oldLabel;
     if (newLabel === oldLabel) continue;
     for (const sub of state.subtitles) {
-      if (sub.speaker === id && sub.text.startsWith(oldLabel + ': ')) {
+      if (sub.speaker !== id) continue;
+      if (sub.text.startsWith(oldLabel + ': ')) {
         sub.text = newLabel + ': ' + sub.text.slice(oldLabel.length + 2);
+      } else if (!sub.text.startsWith(newLabel + ': ')) {
+        // כתוביות של דובר יחיד נוצרות בלי קידומת — מוסיפים אותה עכשיו
+        sub.text = newLabel + ': ' + sub.text;
       }
     }
     state.speakers[id] = newLabel;
