@@ -3,7 +3,7 @@
 
 // חותמת גרסה — מתעדכנת בכל שינוי שנדחף. מוצגת בכותרת כדי שאפשר יהיה
 // לוודא במבט שהעדכון האחרון כבר הגיע (האתר והאפליקציה מתעדכנים אוטומטית).
-const APP_VERSION = '2026-07-11 · 23';
+const APP_VERSION = '2026-07-11 · 24';
 
 // ---------- מצב האפליקציה ----------
 const DEFAULT_STYLE = {
@@ -830,6 +830,11 @@ function loadVideoFile(file) {
   state.hasMedia = true;
   state.mediaFile = file;
   state.audioData = null;
+  // קוראים את הקובץ לזיכרון מיד: אם הוא ישתנה/יוזז בדיסק אחר כך (סנכרון ענן,
+  // הורדה שלא הסתיימה) — Chromium יסרב לקרוא אותו מאוחר יותר
+  state.mediaBytesPromise = file.size <= 600 * 1024 * 1024
+    ? file.arrayBuffer().catch(() => null)
+    : Promise.resolve(null);
   $('video-placeholder').classList.add('hidden');
   buildWaveform();
 }
@@ -1129,9 +1134,8 @@ function updateKeyStatus() {
 $('input-elevenlabs-key').addEventListener('input', updateKeyStatus);
 $('input-gemini-key').addEventListener('input', updateKeyStatus);
 setTimeout(updateKeyStatus, 800);
-$('input-gemini-key').addEventListener('change', () => {
-  try { localStorage.setItem('gemini-api-key', $('input-gemini-key').value.trim()); } catch (_) {}
-});
+$('input-gemini-key').addEventListener('input', persistKeys);
+$('input-gemini-key').addEventListener('change', persistKeys);
 try {
   const savedGeminiKey = localStorage.getItem('gemini-api-key');
   if (savedGeminiKey) $('input-gemini-key').value = savedGeminiKey;
@@ -1872,7 +1876,19 @@ function loadTransformersLib() {
 
 // חילוץ האודיו מקובץ הווידאו כ-PCM מונו ב-16kHz (הקצב ש-Whisper מצפה לו)
 async function extractAudio(file) {
-  const arrayBuf = await file.arrayBuffer();
+  let arrayBuf = state.mediaBytesPromise ? await state.mediaBytesPromise : null;
+  if (arrayBuf) {
+    // decodeAudioData 'מרוקן' את הבאפר שהוא מקבל — מפענחים עותק כדי
+    // שהבייטים השמורים יישארו שמישים לשימושים הבאים (תמלול, זיהוי שקט)
+    arrayBuf = arrayBuf.slice(0);
+  } else {
+    try {
+      arrayBuf = await file.arrayBuffer();
+    } catch (_) {
+      throw new Error('קובץ הווידאו השתנה או הוזז מאז שנטען — טענו אותו מחדש. ' +
+        'אם הקובץ יורד או מסתנכרן (iCloud/Drive), חכו שיסיים ונסו שוב');
+    }
+  }
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const ctx = new AudioCtx({ sampleRate: 16000 });
   try {
@@ -1972,9 +1988,16 @@ $('sel-transcribe-engine').addEventListener('change', () => {
   $('whisper-model-group').hidden = el;
 });
 
-$('input-elevenlabs-key').addEventListener('change', () => {
-  try { localStorage.setItem('elevenlabs-api-key', $('input-elevenlabs-key').value.trim()); } catch (_) {}
-});
+function persistKeys() {
+  try {
+    localStorage.setItem('elevenlabs-api-key', $('input-elevenlabs-key').value.trim());
+    localStorage.setItem('gemini-api-key', $('input-gemini-key').value.trim());
+  } catch (_) {}
+}
+// שמירה על כל הקשה (לא רק ב-blur) — מי שמדביק מפתח וסוגר מיד לא מאבד אותו
+$('input-elevenlabs-key').addEventListener('input', persistKeys);
+$('input-elevenlabs-key').addEventListener('change', persistKeys);
+window.addEventListener('beforeunload', persistKeys);
 try {
   const savedKey = localStorage.getItem('elevenlabs-api-key');
   if (savedKey) $('input-elevenlabs-key').value = savedKey;
@@ -2152,7 +2175,8 @@ async function transcribeWithElevenLabs(status) {
   }
 
   status.textContent = 'מעלה את הקובץ ל-ElevenLabs ומתמלל...';
-  const data = await elevenLabsRequest(state.mediaFile, apiKey);
+  const bytes = state.mediaBytesPromise ? await state.mediaBytesPromise : null;
+  const data = await elevenLabsRequest(bytes ? new Blob([bytes]) : state.mediaFile, apiKey);
   const maxWords = transcribeGranularity() || 10;
   if (data.words && data.words.length) return wordsToSubtitles(data.words, maxWords);
   if (data.text && data.text.trim()) {
