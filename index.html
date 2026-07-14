@@ -18,6 +18,7 @@
       <button id="btn-save-project" class="btn">💾 שמירת פרויקט</button>
       <button id="btn-export-srt" class="btn btn-primary">⬇️ ייצוא SRT</button>
       <button id="btn-export-vtt" class="btn btn-primary">⬇️ ייצוא VTT</button>
+      <button id="btn-auto-produce" class="btn btn-primary">🪄 הפקה אוטומטית</button>
       <button id="btn-export-video" class="btn btn-primary">🎞️ הורדת הסרטון עם הכתוביות</button>
       <input type="file" id="input-import-project" accept=".json" hidden aria-label="בחירת קובץ פרויקט לטעינה">
     </div>
@@ -36,6 +37,7 @@
           </label>
           <p class="hint">אפשר גם לעבוד בלי וידאו — התצוגה המקדימה תעבוד על רקע שחור</p>
         </div>
+        <canvas id="composite-canvas" class="composite-canvas" hidden></canvas>
         <div class="subtitle-overlay" id="subtitle-overlay"></div>
       </div>
 
@@ -76,6 +78,7 @@
         <button class="tab" data-tab="translate" role="tab" id="tab-btn-translate" aria-controls="tab-translate" aria-selected="false">תרגום</button>
         <button class="tab" data-tab="transcribe" role="tab" id="tab-btn-transcribe" aria-controls="tab-transcribe" aria-selected="false">תמלול</button>
         <button class="tab" data-tab="cuts" role="tab" id="tab-btn-cuts" aria-controls="tab-cuts" aria-selected="false">חיתוך</button>
+        <button class="tab" data-tab="template" role="tab" id="tab-btn-template" aria-controls="tab-template" aria-selected="false">תבנית</button>
         <button class="tab" data-tab="settings" role="tab" id="tab-btn-settings" aria-controls="tab-settings" aria-selected="false">⚙️</button>
       </div>
 
@@ -443,6 +446,44 @@
             <input type="range" id="rng-silence-pad" min="0" max="0.5" step="0.05" value="0.2">
           </div>
         </details>
+      </div>
+
+      <!-- --- טאב תבנית --- -->
+      <div class="tab-content" id="tab-template" role="tabpanel" aria-labelledby="tab-btn-template" tabindex="0">
+        <p class="hint" style="margin-bottom:12px">
+          מצב תבנית: מניחים את הסרטון שלכם (עם מסך ירוק) על רקע לבחירתכם, ממקמים
+          וממדרים אותו — והכתוביות מעל. הכול נצרב יחד בייצוא הווידאו.
+        </p>
+
+        <label class="checkbox-row" style="margin-bottom:12px">
+          <input type="checkbox" id="chk-template-enabled">
+          הפעלת מצב תבנית
+        </label>
+
+        <div class="form-group">
+          <label class="btn" style="width:100%;justify-content:center">
+            🖼️ בחירת רקע (תמונה או וידאו)
+            <input type="file" id="input-bg" accept="image/*,video/*" hidden>
+          </label>
+          <p class="hint" id="bg-status">לא נבחר רקע — יוצג רקע שחור</p>
+        </div>
+
+        <label class="checkbox-row">
+          <input type="checkbox" id="chk-chroma" checked>
+          הסרת מסך ירוק מהסרטון
+        </label>
+
+        <div class="form-group">
+          <label for="rng-chroma-strength">עוצמת הסרת הירוק: <span id="chroma-strength-value">0.35</span></label>
+          <input type="range" id="rng-chroma-strength" min="0.1" max="0.7" step="0.05" value="0.35">
+        </div>
+
+        <div class="form-group">
+          <label for="rng-tpl-scale">גודל הסרטון בתבנית: <span id="tpl-scale-value">60</span>%</label>
+          <input type="range" id="rng-tpl-scale" min="15" max="100" value="60">
+        </div>
+
+        <p class="hint">מיקום: פשוט גוררים את הסרטון על התצוגה המקדימה למקום הרצוי.</p>
       </div>
 
       <!-- --- טאב הגדרות --- -->

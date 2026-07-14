@@ -3,7 +3,7 @@
 
 // חותמת גרסה — מתעדכנת בכל שינוי שנדחף. מוצגת בכותרת כדי שאפשר יהיה
 // לוודא במבט שהעדכון האחרון כבר הגיע (האתר והאפליקציה מתעדכנים אוטומטית).
-const APP_VERSION = '2026-07-11 · 24';
+const APP_VERSION = '2026-07-11 · 25';
 
 // ---------- מצב האפליקציה ----------
 const DEFAULT_STYLE = {
@@ -361,6 +361,7 @@ function tick(now) {
   lastTick = now;
   updateTimeUI();
   renderOverlay();
+  if (template.enabled) renderCompositePreview();
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
@@ -1580,6 +1581,162 @@ function cutTransitionIntensity(t, style) {
   return k;
 }
 
+// ---------- מצב תבנית: מסך ירוק + רקע ----------
+const template = {
+  enabled: false,
+  chroma: true,
+  strength: 0.35,
+  x: 50, y: 50,      // מרכז הסרטון באחוזים מהקנבס
+  scale: 60,          // רוחב הסרטון באחוזים מרוחב הקנבס
+  bgEl: null,         // Image או video של הרקע
+};
+
+// הסרת ירוק על קנבס עזר (2D — פשוט ואמין)
+const chromaCanvas = document.createElement('canvas');
+const chromaCtx = chromaCanvas.getContext('2d', { willReadFrequently: true });
+
+function keyedFrame(sourceEl, w, h) {
+  chromaCanvas.width = w;
+  chromaCanvas.height = h;
+  chromaCtx.drawImage(sourceEl, 0, 0, w, h);
+  if (!template.chroma) return chromaCanvas;
+  const img = chromaCtx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const s = template.strength;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    // ירוק דומיננטי → שקוף; קצה רך לפי העוצמה
+    const dom = g - Math.max(r, b);
+    if (g > 80 && dom > 255 * s * 0.35) d[i + 3] = 0;
+    else if (g > 80 && dom > 255 * s * 0.2) d[i + 3] = Math.round(255 * (1 - dom / (255 * s * 0.35)));
+  }
+  chromaCtx.putImageData(img, 0, 0);
+  return chromaCanvas;
+}
+
+// ציור התבנית המלאה: רקע + סרטון מוסר-ירוק במיקום ובגודל שנבחרו
+function drawTemplate(ctx, W, H) {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  const bg = template.bgEl;
+  if (bg) {
+    const bw = bg.videoWidth || bg.naturalWidth || W;
+    const bh = bg.videoHeight || bg.naturalHeight || H;
+    const cover = Math.max(W / bw, H / bh);
+    ctx.drawImage(bg, (W - bw * cover) / 2, (H - bh * cover) / 2, bw * cover, bh * cover);
+  }
+  if (state.hasMedia && video.videoWidth) {
+    const vw = W * template.scale / 100;
+    const vh = vw * video.videoHeight / video.videoWidth;
+    // הסרת ירוק ברזולוציה מוגבלת לביצועים, ציור בגודל היעד
+    const kw = Math.min(video.videoWidth, 640);
+    const kh = Math.round(kw * video.videoHeight / video.videoWidth);
+    const frame = keyedFrame(video, kw, kh);
+    ctx.drawImage(frame, W * template.x / 100 - vw / 2, H * template.y / 100 - vh / 2, vw, vh);
+  }
+}
+
+// תצוגה מקדימה חיה של התבנית
+const compositeCanvas = $('composite-canvas');
+const compositeCtx = compositeCanvas.getContext('2d');
+
+function renderCompositePreview() {
+  if (!template.enabled) return;
+  const rect = compositeCanvas.parentElement.getBoundingClientRect();
+  if (compositeCanvas.width !== Math.round(rect.width)) {
+    compositeCanvas.width = Math.round(rect.width);
+    compositeCanvas.height = Math.round(rect.height);
+  }
+  drawTemplate(compositeCtx, compositeCanvas.width, compositeCanvas.height);
+}
+
+function setTemplateEnabled(on) {
+  template.enabled = on;
+  compositeCanvas.hidden = !on;
+  video.style.visibility = on ? 'hidden' : '';
+  if (on && template.bgEl && template.bgEl.play) template.bgEl.play().catch(() => {});
+}
+
+$('chk-template-enabled').addEventListener('change', () => setTemplateEnabled($('chk-template-enabled').checked));
+$('chk-chroma').addEventListener('change', () => { template.chroma = $('chk-chroma').checked; });
+$('rng-chroma-strength').addEventListener('input', () => {
+  template.strength = Number($('rng-chroma-strength').value);
+  $('chroma-strength-value').textContent = template.strength;
+});
+$('rng-tpl-scale').addEventListener('input', () => {
+  template.scale = Number($('rng-tpl-scale').value);
+  $('tpl-scale-value').textContent = template.scale;
+});
+
+$('input-bg').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  if (file.type.startsWith('video/')) {
+    const v = document.createElement('video');
+    v.src = url; v.muted = true; v.loop = true; v.playsInline = true;
+    v.play().catch(() => {});
+    template.bgEl = v;
+  } else {
+    const img = new Image();
+    img.src = url;
+    template.bgEl = img;
+  }
+  $('bg-status').textContent = '✓ נבחר רקע: ' + file.name;
+  if (!$('chk-template-enabled').checked) {
+    $('chk-template-enabled').checked = true;
+    setTemplateEnabled(true);
+  }
+  e.target.value = '';
+});
+
+// גרירת הסרטון על התצוגה למיקום חופשי
+compositeCanvas.addEventListener('mousedown', (e) => {
+  if (exportingVideo) return;
+  e.preventDefault();
+  const rect = compositeCanvas.getBoundingClientRect();
+  const onMove = (ev) => {
+    template.x = Math.round(Math.max(0, Math.min(100, (ev.clientX - rect.left) / rect.width * 100)));
+    template.y = Math.round(Math.max(0, Math.min(100, (ev.clientY - rect.top) / rect.height * 100)));
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+  };
+  document.addEventListener('mousemove', onMove);
+  document.addEventListener('mouseup', onUp);
+});
+
+// ---------- הפקה אוטומטית: קליק אחד מהתחלה לסוף ----------
+let autoProducing = false;
+
+async function autoProduce() {
+  if (autoProducing) return;
+  if (!state.mediaFile) { alert('טענו קודם קובץ וידאו.'); return; }
+  autoProducing = true;
+  const btn = $('btn-auto-produce');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  try {
+    btn.textContent = '🪄 1/3 מתמלל...';
+    await transcribeVideo();
+    if (!state.subtitles.length) throw new Error('התמלול לא יצר כתוביות — בדקו את המפתח/ההגדרות בטאב התמלול');
+
+    btn.textContent = '🪄 2/3 מזהה שקט...';
+    await detectSilencesInMedia();
+
+    btn.textContent = '🪄 3/3 מייצא וידאו...';
+    await exportVideoWithSubtitles();
+  } catch (err) {
+    alert('ההפקה האוטומטית נעצרה: ' + (err.message || err));
+  } finally {
+    autoProducing = false;
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+$('btn-auto-produce').addEventListener('click', autoProduce);
+
 // ---------- ייצוא וידאו עם כתוביות צרובות ----------
 let exportingVideo = false;
 let exportRecorder = null;
@@ -1762,6 +1919,8 @@ async function exportVideoWithSubtitles() {
   exportRecorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
 
   let cancelled = false;
+  let exportDoneResolve;
+  const exportDone = new Promise(r => { exportDoneResolve = r; });
   exportRecorder.onstop = () => {
     if (!cancelled && chunks.length) {
       const blob = new Blob(chunks, { type: mime || 'video/webm' });
@@ -1777,6 +1936,7 @@ async function exportVideoWithSubtitles() {
     $('export-video-bar').hidden = true;
     video.pause();
     updatePlayButton();
+    exportDoneResolve();
   };
 
   $('btn-cancel-export').onclick = () => {
@@ -1813,16 +1973,20 @@ async function exportVideoWithSubtitles() {
     const transition = $('sel-cut-transition').value;
     const k = cutTransitionIntensity(t, transition);
 
+    const drawFrame = () => {
+      if (template.enabled) drawTemplate(ctx, W, H);
+      else ctx.drawImage(video, 0, 0, W, H);
+    };
     if (transition === 'zoom' && k > 0) {
       ctx.save();
       const z = 1 + 0.08 * k;
       ctx.translate(W / 2, H / 2);
       ctx.scale(z, z);
       ctx.translate(-W / 2, -H / 2);
-      ctx.drawImage(video, 0, 0, W, H);
+      drawFrame();
       ctx.restore();
     } else {
-      ctx.drawImage(video, 0, 0, W, H);
+      drawFrame();
     }
 
     drawSubtitlesOnCanvas(ctx, W, H, t, scale);
@@ -1842,6 +2006,7 @@ async function exportVideoWithSubtitles() {
     requestAnimationFrame(drawLoop);
   };
   drawLoop();
+  await exportDone;
 }
 
 $('btn-export-video').addEventListener('click', exportVideoWithSubtitles);
