@@ -1,0 +1,105 @@
+/* Content Verification Badge — compact single-status chip */
+
+.piv-title-badge-glue {
+	display: inline;
+	white-space: nowrap;
+	font-size: 0;
+	line-height: 0;
+}
+
+.piv-marker {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-inline-start: 0;
+	padding: 2px 8px;
+	border-radius: 6px;
+	background: var(--piv-bg, #f8fafc);
+	border: 1px solid color-mix(in srgb, var(--piv-color, #1e88e5) 20%, #e5e7eb);
+	color: var(--piv-color, #1e88e5);
+	vertical-align: middle;
+	line-height: 1.2;
+	white-space: nowrap;
+	flex-shrink: 0;
+	box-sizing: border-box;
+}
+
+.piv-marker__dot {
+	display: inline-block;
+	font-size: 8px;
+	line-height: 1;
+	flex-shrink: 0;
+}
+
+.piv-marker__text {
+	font-size: 11px;
+	font-weight: 600;
+	line-height: 1.2;
+}
+
+h1 .piv-marker,
+h2 .piv-marker,
+h3 .piv-marker,
+h4 .piv-marker,
+h5 .piv-marker,
+h6 .piv-marker,
+.entry-title .piv-marker,
+.elementor-heading-title .piv-marker {
+	vertical-align: middle;
+}
+
+/* Singular post title only — do not alter listing/loop card layouts */
+body.single .elementor-widget-theme-post-title .elementor-widget-container,
+body.single-post .elementor-widget-theme-post-title .elementor-widget-container,
+body.single .elementor-widget-post-title .elementor-widget-container,
+body.single-post .elementor-widget-post-title .elementor-widget-container {
+	display: flex;
+	flex-wrap: nowrap;
+	align-items: center;
+	column-gap: 8px;
+	row-gap: 0;
+	max-width: 100%;
+}
+
+body.single .elementor-widget-theme-post-title .elementor-heading-title,
+body.single-post .elementor-widget-theme-post-title .elementor-heading-title,
+body.single .elementor-widget-post-title .elementor-heading-title,
+body.single-post .elementor-widget-post-title .elementor-heading-title {
+	flex: 1 1 auto;
+	min-width: 0;
+	margin: 0;
+}
+
+body.single .elementor-widget-theme-post-title .piv-marker,
+body.single-post .elementor-widget-theme-post-title .piv-marker,
+body.single .elementor-widget-post-title .piv-marker,
+body.single-post .elementor-widget-post-title .piv-marker {
+	flex: 0 0 auto;
+	align-self: center;
+}
+
+.piv-inline-badge,
+.piv-badge {
+	display: inline-flex;
+	align-items: center;
+	margin-inline-start: 8px;
+	padding: 0;
+	background: none !important;
+	border: 0 !important;
+	box-shadow: none !important;
+}
+
+@media (max-width: 640px) {
+	.piv-marker {
+		padding: 2px 6px;
+		gap: 3px;
+	}
+
+	.piv-marker__dot {
+		font-size: 7px;
+	}
+
+	.piv-marker__text {
+		font-size: 10px;
+	}
+}

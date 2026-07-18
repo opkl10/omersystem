@@ -1,0 +1,271 @@
+.piv-admin-wrap .piv-layer-legend {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	max-width: 720px;
+}
+
+.piv-admin-wrap .piv-layer-legend__item {
+	padding: 12px 14px;
+	margin-bottom: 8px;
+	border-radius: 8px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+}
+
+.piv-admin-wrap .piv-layer-legend__item span {
+	display: block;
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.piv-admin-wrap .piv-layer-legend__item em {
+	color: #646970;
+}
+
+.piv-metabox__status {
+	margin-top: 0;
+	font-size: 14px;
+}
+
+.piv-metabox__reason,
+.piv-metabox__time,
+.piv-metabox__checking,
+.piv-metabox__counts,
+.piv-metabox__sources {
+	font-size: 12px;
+}
+
+.piv-metabox__counts,
+.piv-metabox__sources-list {
+	margin: 8px 0;
+	padding-inline-start: 18px;
+}
+
+.piv-metabox__sources {
+	margin-top: 10px;
+}
+
+.piv-metabox__sources-list li + li {
+	margin-top: 6px;
+}
+
+.piv-metabox__scan-log {
+	margin: 8px 0 0;
+	padding-inline-start: 18px;
+	font-size: 11px;
+	max-height: 180px;
+	overflow: auto;
+}
+
+.piv-metabox__status--initial_report { color: #9a7b00; }
+.piv-metabox__status--under_review { color: #1565c0; }
+.piv-metabox__status--trusted_source { color: #e65100; }
+.piv-metabox__status--verified { color: #2e7d32; }
+
+.piv-metabox__manual {
+	margin: 12px 0;
+	padding: 10px;
+	border: 1px solid #dcdcde;
+	background: #f6f7f7;
+	border-radius: 4px;
+}
+
+.piv-metabox__manual p {
+	margin: 8px 0;
+}
+
+.piv-metabox__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+
+/* Report page */
+.piv-report-wrap .piv-report-filters .search-box {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 16px 0;
+}
+
+.piv-report-wrap .piv-report-summary {
+	margin: 0 0 12px;
+	color: #646970;
+}
+
+.piv-report-table .piv-col-percent {
+	min-width: 140px;
+}
+
+.piv-report-table .piv-col-status {
+	min-width: 160px;
+}
+
+.piv-report-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	padding: 2px 8px;
+	border-radius: 6px;
+	background: #f6f7f7;
+	border: 1px solid #dcdcde;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--piv-color, #50575e);
+}
+
+.piv-report-badge--none,
+.piv-report-row--excluded .piv-report-badge {
+	color: #646970;
+}
+
+.piv-report-percent {
+	position: relative;
+	background: #f0f0f1;
+	border-radius: 999px;
+	height: 22px;
+	min-width: 100px;
+	overflow: hidden;
+}
+
+.piv-report-percent__bar {
+	position: absolute;
+	inset-block: 0;
+	inset-inline-start: 0;
+	background: linear-gradient(90deg, #90caf9, #1e88e5);
+	border-radius: 999px;
+	transition: width 0.6s ease;
+}
+
+.piv-report-percent__value {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 22px;
+	font-size: 11px;
+	font-weight: 700;
+	color: #1d2327;
+}
+
+.piv-report-row--excluded td {
+	opacity: 0.75;
+}
+
+.piv-col-reason {
+	max-width: 280px;
+	font-size: 12px;
+	color: #646970;
+}
+
+.piv-col-sources {
+	min-width: 220px;
+	max-width: 320px;
+}
+
+.piv-report-sources-count {
+	display: block;
+	font-weight: 600;
+	margin-bottom: 4px;
+}
+
+.piv-report-sources-list {
+	margin: 0;
+	padding-inline-start: 18px;
+	font-size: 12px;
+}
+
+.piv-report-sources-list li + li {
+	margin-top: 4px;
+}
+
+.piv-coverage-panel {
+	max-width: 760px;
+	margin: 0 0 24px;
+	padding: 16px 18px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+}
+
+.piv-coverage-stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 16px 24px;
+	margin: 0 0 12px;
+	padding: 0;
+	list-style: none;
+}
+
+.piv-coverage-stats li {
+	margin: 0;
+}
+
+#piv-enqueue-all-status {
+	margin-inline-start: 8px;
+}
+
+.piv-coverage-progress {
+	margin: 0 0 14px;
+}
+
+.piv-coverage-progress__track {
+	position: relative;
+	height: 14px;
+	border-radius: 999px;
+	background: #f0f0f1;
+	overflow: hidden;
+}
+
+.piv-coverage-progress__bar {
+	height: 100%;
+	border-radius: 999px;
+	background: linear-gradient(90deg, #66bb6a, #2e7d32);
+	transition: width 0.8s ease;
+}
+
+.piv-coverage-progress.is-active .piv-coverage-progress__bar {
+	background: linear-gradient(90deg, #42a5f5, #1565c0);
+}
+
+.piv-coverage-progress__meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 16px;
+	margin-top: 8px;
+}
+
+.piv-coverage-progress__label {
+	font-weight: 700;
+	color: #1d2327;
+}
+
+.piv-coverage-progress__status {
+	font-size: 12px;
+	color: #646970;
+}
+
+.piv-coverage-progress.is-active .piv-coverage-progress__status {
+	color: #1565c0;
+	animation: piv-pulse 1.6s ease-in-out infinite;
+}
+
+.piv-report-coverage {
+	max-width: 760px;
+	margin: 0 0 20px;
+	padding: 16px 18px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+}
+
+@keyframes piv-pulse {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.55; }
+}
