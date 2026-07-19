@@ -8,9 +8,11 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class PIV_Queue {
 
-	const OPTION_QUEUE = 'piv_verify_queue';
-	const HOOK_PROCESS = 'piv_process_verify_queue';
+	const OPTION_QUEUE  = 'piv_verify_queue';
+	const HOOK_PROCESS  = 'piv_process_verify_queue';
 	const CRON_SCHEDULE = 'piv_five_minutes';
+	const OPTION_TOKEN  = 'piv_queue_async_token';
+	const LOCK_KEY      = 'piv_queue_running';
 
 	/**
 	 * Register hooks.
@@ -18,6 +20,112 @@ class PIV_Queue {
 	public static function init() {
 		add_filter( 'cron_schedules', array( __CLASS__, 'register_schedule' ) );
 		add_action( self::HOOK_PROCESS, array( __CLASS__, 'process_batch' ) );
+
+		// Async loopback runner — processes the queue even when WP-Cron never fires.
+		add_action( 'wp_ajax_piv_run_queue', array( __CLASS__, 'handle_async_run' ) );
+		add_action( 'wp_ajax_nopriv_piv_run_queue', array( __CLASS__, 'handle_async_run' ) );
+
+		// Watchdog: any admin page view restarts a stalled queue.
+		add_action( 'admin_init', array( __CLASS__, 'admin_watchdog' ) );
+	}
+
+	/**
+	 * Secret token that authorizes async queue runs (loopback requests are unauthenticated).
+	 *
+	 * @return string
+	 */
+	public static function get_async_token() {
+		$token = get_option( self::OPTION_TOKEN );
+		if ( ! is_string( $token ) || strlen( $token ) < 32 ) {
+			$token = wp_generate_password( 64, false, false );
+			update_option( self::OPTION_TOKEN, $token, false );
+		}
+
+		return $token;
+	}
+
+	/**
+	 * Fire a non-blocking loopback request that processes the queue in the background.
+	 */
+	public static function dispatch_async() {
+		wp_remote_post(
+			admin_url( 'admin-ajax.php' ),
+			array(
+				'timeout'   => 0.01,
+				'blocking'  => false,
+				'sslverify' => apply_filters( 'https_local_ssl_verify', false ),
+				'body'      => array(
+					'action' => 'piv_run_queue',
+					'token'  => self::get_async_token(),
+				),
+			)
+		);
+	}
+
+	/**
+	 * Async endpoint: process one batch, then chain the next run until the queue drains.
+	 */
+	public static function handle_async_run() {
+		$token = isset( $_POST['token'] ) ? (string) wp_unslash( $_POST['token'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing
+		if ( ! hash_equals( self::get_async_token(), $token ) ) {
+			wp_die( '', '', array( 'response' => 403 ) );
+		}
+
+		// One runner at a time.
+		if ( get_transient( self::LOCK_KEY ) ) {
+			wp_die();
+		}
+		set_transient( self::LOCK_KEY, 1, 2 * MINUTE_IN_SECONDS );
+
+		ignore_user_abort( true );
+		if ( function_exists( 'set_time_limit' ) ) {
+			set_time_limit( 300 );
+		}
+
+		self::process_batch();
+
+		delete_transient( self::LOCK_KEY );
+
+		if ( self::queue_count() > 0 ) {
+			self::dispatch_async();
+		}
+
+		wp_die();
+	}
+
+	/**
+	 * Restart queue processing from normal admin traffic when cron is dead.
+	 */
+	public static function admin_watchdog() {
+		if ( wp_doing_ajax() || wp_doing_cron() ) {
+			return;
+		}
+		if ( ! current_user_can( 'edit_posts' ) ) {
+			return;
+		}
+		if ( get_transient( self::LOCK_KEY ) ) {
+			return;
+		}
+
+		if ( self::queue_count() > 0 ) {
+			if ( get_transient( 'piv_queue_watchdog' ) ) {
+				return;
+			}
+			set_transient( 'piv_queue_watchdog', 1, MINUTE_IN_SECONDS );
+			self::kick();
+			return;
+		}
+
+		// Empty queue: rescue posts stuck in "checking"/"under review" that cron never
+		// picked up (they already have a layer, so the unverified backfill skips them).
+		if ( get_transient( 'piv_queue_rescue' ) ) {
+			return;
+		}
+		set_transient( 'piv_queue_rescue', 1, 10 * MINUTE_IN_SECONDS );
+
+		if ( class_exists( 'PIV_Cron' ) ) {
+			PIV_Cron::recheck_open_posts();
+		}
 	}
 
 	/**
@@ -134,6 +242,9 @@ class PIV_Queue {
 		if ( function_exists( 'spawn_cron' ) ) {
 			spawn_cron();
 		}
+
+		// Cron-independent path: async loopback runner picks the queue up immediately.
+		self::dispatch_async();
 	}
 
 	/**
