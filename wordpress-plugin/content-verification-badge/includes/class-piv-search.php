@@ -9,6 +9,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 class PIV_Search {
 
 	/**
+	 * Last Google CSE error message (surfaced in diagnostics instead of being swallowed).
+	 *
+	 * @var string
+	 */
+	public static $last_google_error = '';
+
+	const GOOGLE_QUOTA_TRANSIENT = 'piv_google_quota_exceeded';
+
+	/**
 	 * Discover external sources for a post by searching the web.
 	 *
 	 * @param WP_Post $post Post object.
@@ -99,7 +108,9 @@ class PIV_Search {
 			'raw_count'       => count( $raw_urls ),
 			'urls'            => $filtered,
 			'discovered'      => ! empty( $filtered ),
-			'error'           => empty( $raw_urls ) ? 'no_results' : ( empty( $filtered ) ? 'filtered_out' : '' ),
+			'error'           => empty( $raw_urls )
+				? ( '' !== self::$last_google_error ? self::$last_google_error : ( get_transient( self::GOOGLE_QUOTA_TRANSIENT ) ? 'google_quota: ' . (string) get_transient( self::GOOGLE_QUOTA_TRANSIENT ) : 'no_results' ) )
+				: ( empty( $filtered ) ? 'filtered_out' : '' ),
 		);
 
 		if ( ! $skip_cache ) {
@@ -677,7 +688,17 @@ class PIV_Search {
 	 * @return bool
 	 */
 	public static function can_use_google( $settings ) {
-		return ! empty( $settings['google_api_key'] ) && ! empty( $settings['google_cx'] );
+		if ( empty( $settings['google_api_key'] ) || empty( $settings['google_cx'] ) ) {
+			return false;
+		}
+
+		// Daily quota exhausted — stop burning requests and use free fallbacks
+		// until the block expires.
+		if ( get_transient( self::GOOGLE_QUOTA_TRANSIENT ) ) {
+			return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -714,10 +735,25 @@ class PIV_Search {
 
 		$response = wp_remote_get( $url, array( 'timeout' => 10 ) );
 		if ( is_wp_error( $response ) ) {
+			self::$last_google_error = 'google_cse: ' . $response->get_error_message();
 			return array();
 		}
 
+		$code = (int) wp_remote_retrieve_response_code( $response );
 		$data = json_decode( (string) wp_remote_retrieve_body( $response ), true );
+
+		if ( $code < 200 || $code >= 300 ) {
+			$message = isset( $data['error']['message'] ) ? (string) $data['error']['message'] : ( 'HTTP ' . $code );
+			self::$last_google_error = 'google_cse: ' . $message;
+
+			// 429 / quota errors: block further calls for a while so free fallbacks run instead.
+			if ( 429 === $code || false !== stripos( $message, 'quota' ) || false !== stripos( $message, 'rate limit' ) ) {
+				set_transient( self::GOOGLE_QUOTA_TRANSIENT, $message, 2 * HOUR_IN_SECONDS );
+			}
+
+			return array();
+		}
+
 		if ( empty( $data['items'] ) || ! is_array( $data['items'] ) ) {
 			return array();
 		}

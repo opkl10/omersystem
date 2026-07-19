@@ -392,5 +392,52 @@
 			});
 	});
 
+	$(document).on('click', '#piv-test-connections-btn', function () {
+		var $btn = $(this);
+		var $out = $('#piv-test-connections-results');
+
+		if (!window.pivAdmin) {
+			return;
+		}
+
+		var labels = {
+			google: 'Google Custom Search',
+			gemini: 'Gemini AI',
+			google_news: 'Google News RSS',
+			loopback: 'עיבוד רקע (Loopback)',
+			wp_cron: 'WP-Cron'
+		};
+
+		$btn.prop('disabled', true);
+		$out.html('<p>בודק חיבורים... (עד 30 שניות)</p>');
+
+		$.post(pivAdmin.ajaxUrl, {
+			action: 'piv_test_connections',
+			nonce: pivAdmin.nonce
+		})
+			.done(function (response) {
+				if (!response || !response.success || !response.data || !response.data.results) {
+					$out.html('<p style="color:#b32d2e">שגיאה בהרצת בדיקת החיבורים</p>');
+					return;
+				}
+
+				var html = '<ul style="margin-top:8px">';
+				$.each(response.data.results, function (key, row) {
+					var icon = row.ok ? '✅' : '❌';
+					var name = labels[key] || key;
+					html += '<li>' + icon + ' <strong>' + name + ':</strong> ' +
+						$('<span>').text(row.message || '').html() + '</li>';
+				});
+				html += '</ul>';
+				$out.html(html);
+			})
+			.fail(function () {
+				$out.html('<p style="color:#b32d2e">שגיאה בהרצת בדיקת החיבורים</p>');
+			})
+			.always(function () {
+				$btn.prop('disabled', false);
+			});
+	});
+
 	$(initLiveUpdates);
 })(jQuery);

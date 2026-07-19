@@ -19,6 +19,120 @@ class PIV_Admin {
 		add_action( 'wp_ajax_piv_reset_all_verifications', array( __CLASS__, 'ajax_reset_all_verifications' ) );
 		add_action( 'wp_ajax_piv_get_coverage_stats', array( __CLASS__, 'ajax_get_coverage_stats' ) );
 		add_action( 'wp_ajax_piv_get_report_rows', array( __CLASS__, 'ajax_get_report_rows' ) );
+		add_action( 'wp_ajax_piv_test_connections', array( __CLASS__, 'ajax_test_connections' ) );
+	}
+
+	/**
+	 * AJAX: live-test every external dependency and return exact errors.
+	 */
+	public static function ajax_test_connections() {
+		check_ajax_referer( 'piv_admin_actions', 'nonce' );
+
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'אין הרשאה', 'content-verification-badge' ) ), 403 );
+		}
+
+		if ( function_exists( 'set_time_limit' ) ) {
+			set_time_limit( 120 );
+		}
+
+		$settings = PIV_Helpers::get_settings();
+		$results  = array();
+
+		// --- Google CSE ---
+		if ( empty( $settings['google_api_key'] ) || empty( $settings['google_cx'] ) ) {
+			$results['google'] = array(
+				'ok'      => false,
+				'message' => __( 'לא הוגדרו מפתח API ו-CX', 'content-verification-badge' ),
+			);
+		} else {
+			delete_transient( PIV_Search::GOOGLE_QUOTA_TRANSIENT );
+			PIV_Search::$last_google_error = '';
+			$urls = PIV_Search::search_google_cse( 'playstation 5 news', 5, $settings );
+			if ( '' !== PIV_Search::$last_google_error ) {
+				$results['google'] = array(
+					'ok'      => false,
+					'message' => PIV_Search::$last_google_error,
+				);
+			} elseif ( empty( $urls ) ) {
+				$results['google'] = array(
+					'ok'      => false,
+					'message' => __( 'החיבור עובד אבל חזרו 0 תוצאות — כנראה מנוע החיפוש (CX) לא מוגדר עם "Search the entire web"', 'content-verification-badge' ),
+				);
+			} else {
+				$results['google'] = array(
+					'ok'      => true,
+					'message' => sprintf(
+						/* translators: %d: number of results */
+						__( 'החיבור תקין — חזרו %d תוצאות', 'content-verification-badge' ),
+						count( $urls )
+					),
+				);
+			}
+		}
+
+		// --- Gemini ---
+		$results['gemini'] = PIV_Gemini::test_connection( $settings );
+
+		// --- Google News RSS (free discovery path) ---
+		$rss_response = wp_remote_get(
+			'https://news.google.com/rss/search?q=playstation&hl=en-US&gl=US&ceid=US:en',
+			array( 'timeout' => 10 )
+		);
+		if ( is_wp_error( $rss_response ) ) {
+			$results['google_news'] = array(
+				'ok'      => false,
+				'message' => $rss_response->get_error_message(),
+			);
+		} else {
+			$rss_body               = (string) wp_remote_retrieve_body( $rss_response );
+			$results['google_news'] = array(
+				'ok'      => false !== stripos( $rss_body, '<item' ),
+				'message' => false !== stripos( $rss_body, '<item' )
+					? __( 'החיבור תקין', 'content-verification-badge' )
+					: ( 'HTTP ' . wp_remote_retrieve_response_code( $rss_response ) ),
+			);
+		}
+
+		// --- Loopback (async queue runner) ---
+		$loopback = wp_remote_post(
+			admin_url( 'admin-ajax.php' ),
+			array(
+				'timeout'   => 8,
+				'sslverify' => apply_filters( 'https_local_ssl_verify', false ),
+				'body'      => array(
+					'action' => 'piv_run_queue',
+					'token'  => 'connectivity-test',
+				),
+			)
+		);
+		if ( is_wp_error( $loopback ) ) {
+			$results['loopback'] = array(
+				'ok'      => false,
+				'message' => sprintf(
+					/* translators: %s: error message */
+					__( 'בקשות loopback חסומות (%s) — עיבוד הרקע תלוי ב-WP-Cron בלבד', 'content-verification-badge' ),
+					$loopback->get_error_message()
+				),
+			);
+		} else {
+			// A 403 means the endpoint answered (bad token as expected) — loopback works.
+			$results['loopback'] = array(
+				'ok'      => true,
+				'message' => __( 'החיבור תקין — עיבוד רקע ללא תלות ב-cron זמין', 'content-verification-badge' ),
+			);
+		}
+
+		// --- WP-Cron state ---
+		$cron_disabled      = defined( 'DISABLE_WP_CRON' ) && DISABLE_WP_CRON;
+		$results['wp_cron'] = array(
+			'ok'      => ! $cron_disabled,
+			'message' => $cron_disabled
+				? __( 'DISABLE_WP_CRON מופעל — ודא cron אמיתי בשרת, או הסתמך על עיבוד הרקע של התוסף', 'content-verification-badge' )
+				: __( 'WP-Cron פעיל', 'content-verification-badge' ),
+		);
+
+		wp_send_json_success( array( 'results' => $results ) );
 	}
 
 	public static function add_menu() {
@@ -717,8 +831,12 @@ class PIV_Admin {
 					<button type="button" class="button button-secondary" id="piv-reset-all-btn">
 						<?php esc_html_e( 'אפס הכל עכשיו', 'content-verification-badge' ); ?>
 					</button>
+					<button type="button" class="button button-secondary" id="piv-test-connections-btn">
+						<?php esc_html_e( 'בדיקת חיבורים', 'content-verification-badge' ); ?>
+					</button>
 					<span class="description" id="piv-enqueue-all-status" aria-live="polite"></span>
 				</p>
+				<div id="piv-test-connections-results" aria-live="polite"></div>
 				<p class="description"><?php esc_html_e( '"אפס הכל עכשיו" מוחק מיד את כל תוצאות האימות, אימות ידני והקאש — ואז מכניס מחדש את הפוסטים לתור סריקה נקייה.', 'content-verification-badge' ); ?></p>
 				<p class="description"><?php esc_html_e( 'הבדיקות רצות ברקע — 5 פוסטים כל כמה שניות (ברירת מחדל). הסרגל והמספרים מתעדכנים אוטומטית.', 'content-verification-badge' ); ?></p>
 			</div>

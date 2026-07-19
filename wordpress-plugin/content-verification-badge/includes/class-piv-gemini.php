@@ -139,6 +139,56 @@ class PIV_Gemini {
 	}
 
 	/**
+	 * Live connectivity test — returns the exact API error when Gemini is broken.
+	 *
+	 * @param array|null $settings Settings.
+	 * @return array{ok:bool,message:string}
+	 */
+	public static function test_connection( $settings = null ) {
+		if ( ! is_array( $settings ) ) {
+			$settings = PIV_Helpers::get_settings();
+		}
+
+		if ( 'yes' !== ( $settings['gemini_enabled'] ?? 'no' ) ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'Gemini כבוי בהגדרות — סמן את "הפעל השוואת Gemini" ושמור', 'content-verification-badge' ),
+			);
+		}
+
+		$api_key = trim( (string) ( $settings['gemini_api_key'] ?? '' ) );
+		if ( '' === $api_key ) {
+			return array(
+				'ok'      => false,
+				'message' => __( 'חסר מפתח Gemini API', 'content-verification-badge' ),
+			);
+		}
+
+		$model = preg_replace( '/[^a-zA-Z0-9._-]/', '', (string) ( $settings['gemini_model'] ?? self::FALLBACK_MODEL ) );
+		if ( '' === $model ) {
+			$model = self::FALLBACK_MODEL;
+		}
+
+		$result = self::request_json(
+			$api_key,
+			$model,
+			'Reply with ONLY this JSON: {"same_story":true,"confidence":1.0,"reason":"ok"}'
+		);
+
+		if ( ! empty( $result['error'] ) ) {
+			return array(
+				'ok'      => false,
+				'message' => sprintf( '%s (model: %s)', (string) $result['error'], $model ),
+			);
+		}
+
+		return array(
+			'ok'      => true,
+			'message' => sprintf( __( 'החיבור תקין (מודל: %s)', 'content-verification-badge' ), $model ),
+		);
+	}
+
+	/**
 	 * Call Gemini generateContent and parse JSON.
 	 *
 	 * @param string $api_key API key.
