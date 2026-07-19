@@ -56,9 +56,9 @@ class PIV_Gemini {
 		}
 
 		$api_key = trim( (string) ( $settings['gemini_api_key'] ?? '' ) );
-		$model   = preg_replace( '/[^a-zA-Z0-9._-]/', '', (string) ( $settings['gemini_model'] ?? 'gemini-3.1-pro-preview' ) );
+		$model   = preg_replace( '/[^a-zA-Z0-9._-]/', '', (string) ( $settings['gemini_model'] ?? self::FALLBACK_MODEL ) );
 		if ( '' === $model ) {
-			$model = 'gemini-3.1-pro-preview';
+			$model = self::FALLBACK_MODEL;
 		}
 
 		$post_text = PIV_Verifier::get_post_comparison_text( $post, 2200 );
@@ -251,9 +251,9 @@ class PIV_Gemini {
 		$code = (int) wp_remote_retrieve_response_code( $response );
 		$raw  = (string) wp_remote_retrieve_body( $response );
 		if ( $code < 200 || $code >= 300 ) {
-			// Unknown/retired model id — retry once with a known-good model instead
-			// of silently losing the semantic comparison.
-			if ( 404 === $code && self::FALLBACK_MODEL !== $model ) {
+			// Unknown model (404) or exhausted per-model quota (429) — retry once with
+			// the cheap fallback model, whose free-tier quota is separate and generous.
+			if ( in_array( $code, array( 404, 429 ), true ) && self::FALLBACK_MODEL !== $model ) {
 				return self::request_json( $api_key, self::FALLBACK_MODEL, $prompt );
 			}
 

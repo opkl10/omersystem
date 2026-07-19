@@ -67,7 +67,7 @@ class PIV_Helpers {
 			'allow_manual_override' => 'yes',
 			'gemini_enabled'      => 'no',
 			'gemini_api_key'      => '',
-			'gemini_model'        => 'gemini-3.1-pro-preview',
+			'gemini_model'        => 'gemini-2.5-flash',
 			'gemini_min_confidence' => 0.72,
 			'gemini_max_compares' => 8,
 			'gemini_required'     => 'no',

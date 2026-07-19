@@ -278,7 +278,7 @@ class PIV_Admin {
 				}
 				return $submitted;
 			} )(),
-			'gemini_model'               => sanitize_text_field( $input['gemini_model'] ?? $existing['gemini_model'] ?? 'gemini-3.1-pro-preview' ),
+			'gemini_model'               => sanitize_text_field( $input['gemini_model'] ?? $existing['gemini_model'] ?? 'gemini-2.5-flash' ),
 			'gemini_min_confidence'      => max( 0.5, min( 0.95, (float) ( $input['gemini_min_confidence'] ?? $existing['gemini_min_confidence'] ?? 0.72 ) ) ),
 			'gemini_max_compares'        => max( 1, min( 20, absint( $input['gemini_max_compares'] ?? $existing['gemini_max_compares'] ?? 8 ) ) ),
 			'gemini_required'            => ! empty( $input['gemini_required'] ) ? 'yes' : 'no',
@@ -601,19 +601,19 @@ class PIV_Admin {
 						<td>
 							<select id="piv_gemini_model" name="<?php echo esc_attr( PIV_Helpers::OPTION_SETTINGS ); ?>[gemini_model]">
 								<?php
-								$gemini_model = (string) ( $settings['gemini_model'] ?? 'gemini-3.1-pro-preview' );
+								$gemini_model = (string) ( $settings['gemini_model'] ?? 'gemini-2.5-flash' );
 								$models       = array(
-									'gemini-3.1-pro-preview' => 'Gemini 3.1 Pro (הכי חזק — מומלץ לדיוק)',
-									'gemini-3-flash-preview' => 'Gemini 3 Flash (מהיר יותר, זול יותר)',
-									'gemini-2.5-pro'         => 'Gemini 2.5 Pro',
-									'gemini-2.5-flash'       => 'Gemini 2.5 Flash (הכי זול)',
+									'gemini-2.5-flash'       => 'Gemini 2.5 Flash (מומלץ — מכסה חינמית נדיבה)',
+									'gemini-3-flash-preview' => 'Gemini 3 Flash (מהיר, זול)',
+									'gemini-2.5-pro'         => 'Gemini 2.5 Pro (דורש חיוב)',
+									'gemini-3.1-pro-preview' => 'Gemini 3.1 Pro (הכי חזק — דורש חיוב, אין כמעט מכסה חינמית)',
 								);
 								foreach ( $models as $value => $label ) :
 									?>
 									<option value="<?php echo esc_attr( $value ); ?>" <?php selected( $gemini_model, $value ); ?>><?php echo esc_html( $label ); ?></option>
 								<?php endforeach; ?>
 							</select>
-							<p class="description"><?php esc_html_e( '3.1 Pro מדויק יותר אבל יקר ואיטי יותר. לחיסכון אפשר לעבור ל־Flash.', 'content-verification-badge' ); ?></p>
+							<p class="description"><?php esc_html_e( 'בתוכנית חינם השתמש ב-2.5 Flash. מודלי Pro דורשים חיוב פעיל ב-Google — בלי חיוב הם מחזירים שגיאת 429 (quota). אם המודל שנבחר נכשל, התוסף עובר אוטומטית ל-2.5 Flash.', 'content-verification-badge' ); ?></p>
 						</td>
 					</tr>
 					<tr>

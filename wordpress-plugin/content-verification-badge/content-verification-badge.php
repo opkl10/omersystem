@@ -3,7 +3,7 @@
  * Plugin Name:       Content Verification Badge
  * Plugin URI:        https://example.com/content-verification-badge
  * Description:       סימון אוטומטי של רמת אימות — מחפש מקורות חיצוניים לפי כותרת הפוסט ומשווה את התוכן.
- * Version:           1.12.2
+ * Version:           1.12.3
  * Author:            Omer Okon
  * Author URI:        https://example.com
  * License:           GPL-2.0+
@@ -15,7 +15,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'PIV_VERSION', '1.12.2' );
+define( 'PIV_VERSION', '1.12.3' );
 define( 'PIV_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'PIV_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 
