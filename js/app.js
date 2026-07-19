@@ -3,7 +3,7 @@
 
 // חותמת גרסה — מתעדכנת בכל שינוי שנדחף. מוצגת בכותרת כדי שאפשר יהיה
 // לוודא במבט שהעדכון האחרון כבר הגיע (האתר והאפליקציה מתעדכנים אוטומטית).
-const APP_VERSION = '2026-07-11 · 25';
+const APP_VERSION = '2026-07-19 · 26';
 
 // ---------- מצב האפליקציה ----------
 const DEFAULT_STYLE = {
@@ -103,8 +103,19 @@ function getSubtitle(id) {
 function selectSubtitle(id) {
   state.selectedId = id;
   syncStylePanel();
-  renderSubtitleList();
-  renderTimeline();
+  updateSelectionHighlight();
+}
+
+// עדכון סימון הבחירה בלבד — בלי לבנות מחדש את כל הרשימה וציר הזמן
+function updateSelectionHighlight() {
+  for (const el of document.querySelectorAll('.subtitle-item.selected, .timeline-block.selected')) {
+    if (Number(el.dataset.id) !== state.selectedId) el.classList.remove('selected');
+  }
+  if (state.selectedId === null) return;
+  const item = subtitleListEl.querySelector(`.subtitle-item[data-id="${state.selectedId}"]`);
+  if (item) item.classList.add('selected');
+  const block = timelineEl.querySelector(`.timeline-block[data-id="${state.selectedId}"]`);
+  if (block) block.classList.add('selected');
 }
 
 function effectiveStyle(sub) {
@@ -121,6 +132,7 @@ function renderSubtitleList() {
   for (const sub of state.subtitles) {
     const item = document.createElement('div');
     item.className = 'subtitle-item' + (sub.id === state.selectedId ? ' selected' : '');
+    item.dataset.id = sub.id;
 
     const times = document.createElement('div');
     times.className = 'subtitle-item-times';
@@ -149,7 +161,8 @@ function renderSubtitleList() {
     textarea.value = sub.text;
     textarea.addEventListener('input', () => {
       sub.text = textarea.value;
-      renderTimeline();
+      const block = timelineEl.querySelector(`.timeline-block[data-id="${sub.id}"]`);
+      if (block) block.childNodes[0].textContent = sub.text;
       renderOverlay(true);
     });
 
@@ -232,9 +245,10 @@ function renderTimeline() {
   for (const sub of state.subtitles) {
     const block = document.createElement('div');
     block.className = 'timeline-block' + (sub.id === state.selectedId ? ' selected' : '');
+    block.dataset.id = sub.id;
     block.style.left = (sub.start / dur * 100) + '%';
     block.style.width = Math.max((sub.end - sub.start) / dur * 100, 0.5) + '%';
-    block.textContent = sub.text;
+    block.appendChild(document.createTextNode(sub.text));
     block.title = `${formatTime(sub.start)} → ${formatTime(sub.end)}\nגרירה = הזזה, קצוות = שינוי משך`;
     const hl = document.createElement('div');
     hl.className = 'tb-handle tb-handle-l';
@@ -253,8 +267,13 @@ function renderTimeline() {
   updateTimelineCursor();
 }
 
+let lastCursorLeft = '';
 function updateTimelineCursor() {
-  timelineCursor.style.left = (currentTime() / timelineDuration() * 100) + '%';
+  const left = (currentTime() / timelineDuration() * 100) + '%';
+  if (left !== lastCursorLeft) {
+    lastCursorLeft = left;
+    timelineCursor.style.left = left;
+  }
 }
 
 timelineEl.addEventListener('click', (e) => {
@@ -312,6 +331,8 @@ function startBlockDrag(e, sub, block) {
 let clockTime = 0;
 let clockPlaying = false;
 let lastTick = null;
+// דגל "צריך ציור מחדש" לתצוגה המקדימה של התבנית
+let templateDirty = true;
 
 function currentTime() {
   return state.hasMedia ? video.currentTime : clockTime;
@@ -322,6 +343,7 @@ function seekTo(t) {
   t = Math.max(0, Math.min(t, timelineDuration()));
   if (state.hasMedia) video.currentTime = t;
   else clockTime = t;
+  templateDirty = true;
   updateTimeUI();
   renderOverlay(true);
 }
@@ -361,15 +383,36 @@ function tick(now) {
   lastTick = now;
   updateTimeUI();
   renderOverlay();
-  if (template.enabled) renderCompositePreview();
+  if (template.enabled) {
+    // ציור התבנית (כולל הסרת ירוק פיקסל-פיקסל) רק כשמשהו זז — לא כשהכול מושהה
+    const playingNow = state.hasMedia ? !video.paused : clockPlaying;
+    const bgPlaying = template.bgEl && template.bgEl.tagName === 'VIDEO' && !template.bgEl.paused;
+    if (playingNow || bgPlaying || templateDirty) {
+      templateDirty = false;
+      renderCompositePreview();
+    }
+  }
   requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
 
+let lastTimeText = '', lastDurText = '', lastSeekVal = -1;
 function updateTimeUI() {
-  $('time-display').textContent = formatTime(currentTime());
-  $('duration-display').textContent = formatTime(timelineDuration());
-  seekBar.value = Math.round(currentTime() / timelineDuration() * 1000);
+  const timeText = formatTime(currentTime());
+  if (timeText !== lastTimeText) {
+    lastTimeText = timeText;
+    $('time-display').textContent = timeText;
+  }
+  const durText = formatTime(timelineDuration());
+  if (durText !== lastDurText) {
+    lastDurText = durText;
+    $('duration-display').textContent = durText;
+  }
+  const seekVal = Math.round(currentTime() / timelineDuration() * 1000);
+  if (seekVal !== lastSeekVal) {
+    lastSeekVal = seekVal;
+    seekBar.value = seekVal;
+  }
   updateTimelineCursor();
 }
 
@@ -445,12 +488,14 @@ function parseHighlights(text) {
 
 // ---------- תצוגת כתוביות (Overlay) ----------
 let lastActiveKey = '';
+// מונה שינויי עיצוב — מתקדם בכל עריכת עיצוב, במקום להשוות את כל העיצוב (JSON) בכל פריים
+let styleRev = 0;
 
 function renderOverlay(force = false) {
   const t = currentTime();
   const active = state.subtitles.filter(s => t >= s.start && t < s.end);
-  const key = active.map(s =>
-    `${s.id}:${subtitleDisplayText(s, effectiveStyle(s), t)}:${JSON.stringify(effectiveStyle(s))}`
+  const key = styleRev + '|' + active.map(s =>
+    `${s.id}:${subtitleDisplayText(s, effectiveStyle(s), t)}`
   ).join('|');
 
   if (!force && key === lastActiveKey) {
@@ -585,6 +630,7 @@ function startSubtitleDrag(e, sub) {
   const onMove = (ev) => {
     const pos = Math.round(Math.max(5, Math.min(95, (ev.clientY - container.top) / container.height * 100)));
     target.position = pos;
+    styleRev++;
     renderOverlay(true);
   };
   const onUp = () => {
@@ -701,8 +747,8 @@ for (const input of Object.values(styleInputs)) {
   input.addEventListener('input', () => {
     readStyleFromPanel(currentStyleTarget());
     updateStyleLabels();
+    styleRev++;
     renderOverlay(true);
-    renderSubtitleList();
   });
 }
 
@@ -715,6 +761,7 @@ $('chk-override').addEventListener('change', () => {
     sub.style = null;
   }
   syncStylePanel();
+  styleRev++;
   renderOverlay(true);
   renderSubtitleList();
 });
@@ -1654,19 +1701,24 @@ function setTemplateEnabled(on) {
   template.enabled = on;
   compositeCanvas.hidden = !on;
   video.style.visibility = on ? 'hidden' : '';
+  templateDirty = true;
   if (on && template.bgEl && template.bgEl.play) template.bgEl.play().catch(() => {});
 }
 
 $('chk-template-enabled').addEventListener('change', () => setTemplateEnabled($('chk-template-enabled').checked));
-$('chk-chroma').addEventListener('change', () => { template.chroma = $('chk-chroma').checked; });
+$('chk-chroma').addEventListener('change', () => { template.chroma = $('chk-chroma').checked; templateDirty = true; });
 $('rng-chroma-strength').addEventListener('input', () => {
   template.strength = Number($('rng-chroma-strength').value);
   $('chroma-strength-value').textContent = template.strength;
+  templateDirty = true;
 });
 $('rng-tpl-scale').addEventListener('input', () => {
   template.scale = Number($('rng-tpl-scale').value);
   $('tpl-scale-value').textContent = template.scale;
+  templateDirty = true;
 });
+video.addEventListener('seeked', () => { templateDirty = true; });
+window.addEventListener('resize', () => { templateDirty = true; });
 
 $('input-bg').addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -1679,9 +1731,11 @@ $('input-bg').addEventListener('change', (e) => {
     template.bgEl = v;
   } else {
     const img = new Image();
+    img.onload = () => { templateDirty = true; };
     img.src = url;
     template.bgEl = img;
   }
+  templateDirty = true;
   $('bg-status').textContent = '✓ נבחר רקע: ' + file.name;
   if (!$('chk-template-enabled').checked) {
     $('chk-template-enabled').checked = true;
@@ -1698,6 +1752,7 @@ compositeCanvas.addEventListener('mousedown', (e) => {
   const onMove = (ev) => {
     template.x = Math.round(Math.max(0, Math.min(100, (ev.clientX - rect.left) / rect.width * 100)));
     template.y = Math.round(Math.max(0, Math.min(100, (ev.clientY - rect.top) / rect.height * 100)));
+    templateDirty = true;
   };
   const onUp = () => {
     document.removeEventListener('mousemove', onMove);
@@ -2574,7 +2629,9 @@ async function restoreAutosave() {
   } catch (_) { /* שחזור נכשל — מתחילים נקי */ }
 }
 
-setInterval(() => {
+// השמירה האוטומטית רצה בזמן פנוי של הדפדפן, כדי לא לקטוע ניגון/אנימציה
+const runWhenIdle = window.requestIdleCallback || ((fn) => setTimeout(fn, 200));
+setInterval(() => runWhenIdle(() => {
   const snap = snapshotProject();
   if (snap === lastAutosave) return;
   try {
@@ -2589,7 +2646,7 @@ setInterval(() => {
       lastAutosave = snap;
     } catch (_) {}
   }
-}, 2500);
+}), 2500);
 
 // ---------- Service Worker: התקנה כאפליקציה ועבודה לא-מקוונת ----------
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
