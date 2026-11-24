@@ -8,6 +8,7 @@ import { STLLoader } from '../vendor/STLLoader.js';
 import { openSketchEditor } from './sketch.js';
 import { combineParts, prep, volumeOf, unionAll, subtractAll, intersectAll } from './csg.js';
 import { loadFonts } from './text.js';
+import { initAI } from './ai.js';
 
 const STORAGE_KEY = 'print3d.project.v1';
 const MATERIALS = { PLA: 1.24, PETG: 1.27, ABS: 1.04, TPU: 1.21 };
@@ -1358,6 +1359,118 @@ function alignSelected(axis, where) {
   commit();
 }
 
+// ---------- עוזר AI: תיאור הסצנה ובניית התוכנית ----------
+function describePart(p, top = true) {
+  const def = CATALOG[p.type];
+  const d = { id: p.id, type: p.type, name: p.name };
+  const changed = Object.fromEntries(Object.entries(p.params || {}).filter(([k, v]) => def.params.find((q) => q.key === k)?.def !== v));
+  if (Object.keys(changed).length) d.params = changed;
+  d.pos = p.pos;
+  if (p.rot.some((v) => v)) d.rot = p.rot;
+  if ((p.scale || [1, 1, 1]).some((v) => v !== 1)) d.scale = p.scale;
+  if (p.hole) d.hole = true;
+  d.color = p.color;
+  if (p.sketch) d.sketch = p.sketch;
+  if (p.text !== undefined) d.text = p.text;
+  if (p.type === 'group') {
+    d.op = p.op;
+    d.children = p.children.map((c) => describePart(c, false));
+  }
+  if (top && meshes.get(p.id)) {
+    const sz = new THREE.Box3().expandByObject(meshes.get(p.id), true).getSize(new THREE.Vector3());
+    d.actual_size_mm = [sz.x, sz.y, sz.z].map((v) => Math.round(v * 10) / 10);
+  }
+  if (p.type === 'mesh') d.note = 'imported STL — keep it by id; it cannot be recreated';
+  return d;
+}
+
+function describeScene() {
+  const warns = [...document.querySelectorAll('#warnings li:not(.ok)')].map((li) => li.textContent.replace(/^⚠ /, ''));
+  return { parts: state.parts.map((p) => describePart(p)), warnings: warns };
+}
+
+const num3 = (v, fb) => (Array.isArray(v) && v.length === 3 && v.every((x) => Number.isFinite(Number(x))) ? v.map((x) => r2(Number(x))) : [...fb]);
+
+function sanitizePart(raw, existing, depth = 0, idx = 0) {
+  if (!raw || typeof raw !== 'object' || depth > 3) return null;
+  const base = raw.id && existing.get(raw.id) ? JSON.parse(JSON.stringify(existing.get(raw.id))) : null;
+  const type = raw.type || base?.type;
+  const def = CATALOG[type];
+  if (!def || (type === 'mesh' && !base)) return null;
+  const p = {
+    id: base?.id || uid(),
+    type,
+    name: String(raw.name || base?.name || def.name).slice(0, 60),
+    params: { ...defaultParams(type), ...(base?.type === type ? base.params : {}) },
+    pos: num3(raw.pos, base?.pos || [0, 0, 0]),
+    rot: num3(raw.rot, base?.rot || [0, 0, 0]),
+    scale: num3(raw.scale, base?.scale || [1, 1, 1]).map((v) => (Math.abs(v) < 0.01 ? 1 : v)),
+    color: /^#[0-9a-f]{6}$/i.test(raw.color || '') ? raw.color : base?.color || PALETTE[idx % PALETTE.length],
+    hole: typeof raw.hole === 'boolean' ? raw.hole : !!base?.hole,
+  };
+  for (const q of def.params) {
+    if (!raw.params || !(q.key in raw.params)) continue;
+    const v = Number(raw.params[q.key]);
+    if (!Number.isFinite(v)) continue;
+    if (q.options) { if (q.options.some(([o]) => o === v)) p.params[q.key] = v; }
+    else p.params[q.key] = Math.min(q.max, Math.max(q.min, v));
+  }
+  if (def.defaultSketch) {
+    const sk = raw.sketch || base?.sketch;
+    const ok = sk && Array.isArray(sk.points) && sk.points.length >= 3 && sk.points.length <= 200 &&
+      sk.points.every((pt) => Array.isArray(pt) && pt.length === 2 && pt.every((x) => Number.isFinite(Number(x)) && Math.abs(x) < 2000));
+    p.sketch = ok ? { points: sk.points.map((pt) => pt.map((x) => r2(Number(x)))), smooth: !!sk.smooth } : def.defaultSketch();
+  }
+  if (def.defaultText !== undefined) p.text = String(raw.text ?? base?.text ?? def.defaultText).slice(0, 80);
+  if (base?.mesh) p.mesh = base.mesh;
+  if (type === 'group') {
+    const baseKids = new Map((base?.children || []).map((c) => [c.id, c]));
+    p.op = (raw.op || base?.op) === 'intersect' ? 'intersect' : 'union';
+    p.children = (raw.children || base?.children || []).map((c, i) => sanitizePart(c, baseKids, depth + 1, i)).filter(Boolean);
+    if (!p.children.length) return null;
+  }
+  return p;
+}
+
+function applyPlan(plan) {
+  if (!plan || !Array.isArray(plan.parts)) throw new Error('התשובה לא כללה רשימת חלקים');
+  const existing = new Map(state.parts.map((p) => [p.id, p]));
+  const raws = plan.parts.slice(0, 80);
+  const parts = raws.map((r, i) => sanitizePart(r, existing, 0, i)).filter(Boolean);
+  if (!parts.length) throw new Error('לא התקבלו חלקים תקינים');
+  if (resultMode) setResultMode(false);
+  if (plan.action === 'add' && state.parts.length) {
+    // מניחים את התוספת ליד המודל הקיים
+    const before = solidsBox();
+    state.parts.push(...parts);
+    syncAll();
+    const added = new THREE.Box3();
+    parts.forEach((p) => added.expandByObject(meshes.get(p.id), true));
+    const dx = before.isEmpty() ? 0 : before.max.x + 10 - added.min.x;
+    parts.forEach((p) => { p.pos[0] = r2(p.pos[0] + dx); p.pos[2] = r2(p.pos[2] - added.min.z); });
+  } else {
+    state.parts = parts;
+  }
+  selectedIds = new Set();
+  selectedId = null;
+  syncAll();
+  // מניחים על המשטח וממרכזים אם צריך
+  const box = solidsBox();
+  if (!box.isEmpty()) {
+    const c = box.getCenter(new THREE.Vector3());
+    const out = box.min.x < -state.settings.bedW / 2 || box.max.x > state.settings.bedW / 2 || box.min.y < -state.settings.bedD / 2 || box.max.y > state.settings.bedD / 2;
+    const dx = out || plan.action !== 'add' ? -c.x : 0, dy = out || plan.action !== 'add' ? -c.y : 0;
+    state.parts.forEach((p) => { p.pos = [r2(p.pos[0] + dx), r2(p.pos[1] + dy), r2(p.pos[2] - box.min.z)]; });
+    syncAll();
+  }
+  renderProps();
+  commit();
+  updateStats();
+  homeView();
+  const warnings = [...document.querySelectorAll('#warnings li:not(.ok)')].map((li) => li.textContent.replace(/^⚠ /, ''));
+  return { count: parts.length, dropped: raws.length - parts.length, warnings };
+}
+
 function group(title) {
   const g = document.createElement('div');
   g.className = 'group';
@@ -1616,6 +1729,7 @@ function init() {
   homeView();
   pushHistory();
   scheduleStats();
+  initAI({ describeScene, applyPlan, undo, toast, settings: () => state.settings });
   loadFonts()
     .then(() => {
       geoCache.clear();

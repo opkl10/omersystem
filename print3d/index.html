@@ -32,6 +32,7 @@
       <input id="fileOpen" type="file" accept=".json,application/json" hidden>
       <input id="fileStl" type="file" accept=".stl,model/stl" hidden>
       <span class="sep"></span>
+      <button id="btnAI" class="ai-btn" title="מתארים במילים מה רוצים, ו-Claude ממדל">✨ עוזר AI</button>
       <button id="btnSettings">⚙ מדפסת</button>
       <button id="btnExport" class="primary">⬇ ייצוא STL</button>
     </div>
@@ -66,6 +67,31 @@
       </div>
       <div class="stats" id="stats" aria-live="polite"></div>
       <ul class="warnings" id="warnings" aria-live="polite"></ul>
+      <section id="aiPanel" class="ai-panel" hidden aria-label="עוזר AI">
+        <header class="ai-head">
+          <strong>✨ עוזר AI</strong>
+          <span class="ai-sub">תאר מה להדפיס — Claude ימדל</span>
+          <button id="aiClose" class="ai-x" aria-label="סגור">✕</button>
+        </header>
+        <div id="aiLog" class="ai-log" aria-live="polite">
+          <p class="ai-intro">אפשר לבקש מוצר חדש ("מחזיק לשלט של המזגן, לתלייה על הקיר") או לשנות את מה שעל המשטח ("תעשה אותו גבוה יותר והוסף חור לבורג"). כל חלק נשאר ניתן לעריכה, ו"בטל" מחזיר אחורה.</p>
+          <div id="aiExamples" class="ai-examples"></div>
+        </div>
+        <div id="aiKeyBox" class="ai-key" hidden>
+          <label for="aiKeyInput">מפתח API של Anthropic</label>
+          <div class="row">
+            <input id="aiKeyInput" type="password" placeholder="sk-ant-…" autocomplete="off">
+            <button id="aiKeySave">שמור</button>
+          </div>
+          <p class="hint">המפתח נשמר רק בדפדפן הזה ונשלח רק ל-Anthropic. מקבלים אותו ב-console.anthropic.com.</p>
+        </div>
+        <p id="aiKeyNote" class="hint ai-keynote" hidden>משתמש במפתח ה-API השמור. <button id="aiKeyForget" class="linklike">החלף מפתח</button></p>
+        <div id="aiStatus" class="ai-status" hidden></div>
+        <div class="ai-compose">
+          <textarea id="aiInput" rows="2" placeholder="למשל: מעמד לטאבלט בזווית 60° עם מקום לכבל" aria-label="מה למדל"></textarea>
+          <button id="aiSend" class="primary">שלח</button>
+        </div>
+      </section>
     </section>
 
     <aside class="panel side-props" aria-label="מאפיינים">
