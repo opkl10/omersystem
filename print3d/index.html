@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>סטודיו הדפסה</title>
+  <meta name="description" content="מידול פשוט של מוצרים בסיסיים למדפסת תלת־ממד וייצוא STL">
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.min.js",
+        "three-mesh-bvh": "./vendor/three-mesh-bvh.module.js",
+        "three-bvh-csg": "./vendor/three-bvh-csg.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◆</span>
+      <input id="projectName" class="project-name" value="פרויקט חדש" aria-label="שם הפרויקט">
+    </div>
+    <div class="actions">
+      <button id="btnUndo" title="בטל (Ctrl+Z)" aria-label="בטל">↶</button>
+      <button id="btnRedo" title="בצע שוב (Ctrl+Y)" aria-label="בצע שוב">↷</button>
+      <span class="sep"></span>
+      <button id="btnNew">חדש</button>
+      <button id="btnOpen">פתח…</button>
+      <button id="btnSave">שמור פרויקט</button>
+      <input id="fileOpen" type="file" accept=".json,application/json" hidden>
+      <span class="sep"></span>
+      <button id="btnSettings">⚙ מדפסת</button>
+      <button id="btnExport" class="primary">⬇ ייצוא STL</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel side-add" aria-label="הוספה">
+      <div class="tabs" role="tablist">
+        <button role="tab" class="tab active" data-tab="product" aria-selected="true">מוצרים</button>
+        <button role="tab" class="tab" data-tab="shape" aria-selected="false">צורות</button>
+      </div>
+      <div id="catalog" class="catalog"></div>
+
+      <h2 class="section-title">חלקים בפרויקט</h2>
+      <ul id="partsList" class="parts-list"></ul>
+      <p class="hint" id="emptyHint">בחר מוצר או צורה כדי להתחיל.</p>
+    </aside>
+
+    <section class="viewport-wrap">
+      <div id="viewport" class="viewport"></div>
+      <div class="view-tools">
+        <div class="seg" role="group" aria-label="מצב גרירה">
+          <button id="modeMove" class="active" title="הזזה (W)">✥ הזזה</button>
+          <button id="modeRotate" title="סיבוב (E)">⟳ סיבוב</button>
+        </div>
+        <button id="btnResult" title="הצג את התוצאה הסופית אחרי חיבור וחיסור">👁 תצוגת תוצאה</button>
+        <button id="btnDrop" title="הנח את כל המודל על משטח ההדפסה">⤓ הנח על המשטח</button>
+        <button id="btnCenter" title="מרכז את המודל על המשטח">⊕ מרכז</button>
+        <button id="btnHome" title="איפוס מבט">⌂</button>
+      </div>
+      <div class="stats" id="stats" aria-live="polite"></div>
+      <ul class="warnings" id="warnings" aria-live="polite"></ul>
+    </section>
+
+    <aside class="panel side-props" aria-label="מאפיינים">
+      <div id="props"></div>
+    </aside>
+  </main>
+
+  <dialog id="settingsDlg">
+    <form method="dialog" class="dlg">
+      <h2>הגדרות מדפסת</h2>
+      <div class="grid2">
+        <label>רוחב משטח (X) <input type="number" id="setBedW" min="50" max="1000"></label>
+        <label>עומק משטח (Y) <input type="number" id="setBedD" min="50" max="1000"></label>
+        <label>גובה הדפסה (Z) <input type="number" id="setBedH" min="50" max="1000"></label>
+        <label>קוטר נחיר <input type="number" id="setNozzle" step="0.05" min="0.1" max="2"></label>
+        <label>מרווח התאמה <input type="number" id="setTol" step="0.05" min="0" max="1"></label>
+        <label>חומר
+          <select id="setMat">
+            <option value="PLA">PLA</option>
+            <option value="PETG">PETG</option>
+            <option value="ABS">ABS</option>
+            <option value="TPU">TPU</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint">מרווח ההתאמה משמש לחלקים שנכנסים זה בזה (כמו מכסה לקופסה). 0.2 מ"מ מתאים לרוב המדפסות.</p>
+      <div class="dlg-actions">
+        <button value="cancel">ביטול</button>
+        <button value="ok" class="primary" id="setOk">שמור</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
