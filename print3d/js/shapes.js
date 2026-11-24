@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeVertices } from '../vendor/BufferGeometryUtils.js';
 import { subtractAll, unionAll } from './csg.js';
+import { textShapes } from './text.js';
 
 const SEG = 96;
 const deg = (d) => (d * Math.PI) / 180;
@@ -42,9 +43,47 @@ function polygonShape(pts) {
   return s;
 }
 
+// אקסטרוזיה עם קצוות מעוגלים או משופעים (פאזה).
+// type: 0 ללא, 1 עיגול, 2 שיפוע. both: גם בתחתית (אחרת רק למעלה — עדיף להדפסה)
+function extrudeEdged(shapes, h, type, r, both, seg = 24) {
+  shapes = [].concat(shapes);
+  if (!type || r <= 0.05) return extrudeZ(shapes, h, 0, seg);
+  // מגבילים את הרדיוס לגובה ולעובי הצורה
+  const pts = shapes.flatMap((sh) => sh.getPoints(8));
+  const xs = pts.map((p) => p.x), ys = pts.map((p) => p.y);
+  const minSide = Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+  r = Math.min(r, h / 2 - 0.01, minSide / 2 - 0.05);
+  if (r <= 0.05) return extrudeZ(shapes, h, 0, seg);
+  const opts = { depth: h - 2 * r, bevelEnabled: true, bevelThickness: r, bevelSize: r, bevelOffset: -r, bevelSegments: type === 1 ? (seg < 12 ? 3 : 8) : 1, curveSegments: seg };
+  const bev = new THREE.ExtrudeGeometry(shapes, opts);
+  if (!both) {
+    // רק למעלה: גאומטריה זהה במבנה עם קצוות ישרים, ולוקחים ממנה את החצי התחתון.
+    // בלי פעולה בוליאנית — מהיר ויציב.
+    const flat = new THREE.ExtrudeGeometry(shapes, { ...opts, bevelSize: 0, bevelOffset: 0 });
+    const a = bev.attributes.position, b = flat.attributes.position;
+    if (a.count === b.count) {
+      const mid = (h - 2 * r) / 2;
+      for (let i = 0; i < a.count; i++) {
+        if (a.getZ(i) < mid) a.setXY(i, b.getX(i), b.getY(i));
+      }
+      bev.deleteAttribute('normal');
+      bev.computeVertexNormals();
+    }
+    flat.dispose();
+  }
+  bev.translate(0, 0, r);
+  return bev;
+}
+
+const EDGE_PARAMS = () => [
+  { key: 'edgeType', label: 'קצוות', def: 0, options: [[0, 'חדים'], [1, 'מעוגלים'], [2, 'משופעים (פאזה)']] },
+  P('edgeR', 'גודל עיגול / שיפוע', 1, 0.2, 20, 0.2),
+  { key: 'edgeBoth', label: 'איפה', def: 0, options: [[0, 'רק למעלה (מומלץ להדפסה)'], [1, 'למעלה ולמטה']] },
+];
+
 // אקסטרוזיה לאורך Z, מ-z0 עד z0+h
-function extrudeZ(shape, h, z0 = 0) {
-  const g = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false, curveSegments: 24 });
+function extrudeZ(shape, h, z0 = 0, seg = 24) {
+  const g = new THREE.ExtrudeGeometry(shape, { depth: h, bevelEnabled: false, curveSegments: seg });
   g.translate(0, 0, z0);
   return g;
 }
@@ -285,7 +324,7 @@ export const CATALOG = {
     desc: 'לוחית שטוחה עם חור לטבעת',
     params: [
       P('w', 'אורך', 50, 15, 150), P('d', 'רוחב', 25, 10, 100), P('t', 'עובי', 3, 1, 10, 0.2),
-      P('r', 'עיגול פינות', 5, 0, 30, 0.5), P('hole', 'קוטר חור', 5, 0, 15, 0.5),
+      P('r', 'עיגול פינות', 5, 0, 30, 0.5), P('hole', 'קוטר חור', 5, 0, 15, 0.5), ...EDGE_PARAMS(),
     ],
     build(p) {
       const s = roundedRectShape(p.w, p.d, p.r);
@@ -293,15 +332,16 @@ export const CATALOG = {
         const m = Math.max(p.hole / 2 + 2.5, p.r * 0.6);
         s.holes.push(circlePath(p.hole / 2, -p.w / 2 + m, 0, THREE.Path));
       }
-      return extrudeZ(s, p.t);
+      return extrudeEdged(s, p.t, p.edgeType, p.edgeR, p.edgeBoth);
     },
   },
 
   // ===== צורות בסיס =====
   box: {
     name: 'קובייה / תיבה', icon: '🟦', cat: 'shape',
-    params: [P('w', 'רוחב', 20, 0.5, 300, 0.5), P('d', 'עומק', 20, 0.5, 300, 0.5), P('h', 'גובה', 20, 0.5, 300, 0.5), P('r', 'עיגול פינות', 0, 0, 50, 0.5)],
-    build: (p) => (p.r > 0.05 ? extrudeZ(roundedRectShape(p.w, p.d, p.r), p.h) : boxAt(p.w, p.d, p.h)),
+    params: [P('w', 'רוחב', 20, 0.5, 300, 0.5), P('d', 'עומק', 20, 0.5, 300, 0.5), P('h', 'גובה', 20, 0.5, 300, 0.5), P('r', 'עיגול פינות', 0, 0, 50, 0.5), ...EDGE_PARAMS()],
+    build: (p) => (p.edgeType ? extrudeEdged(roundedRectShape(p.w, p.d, p.r), p.h, p.edgeType, p.edgeR, p.edgeBoth)
+      : p.r > 0.05 ? extrudeZ(roundedRectShape(p.w, p.d, p.r), p.h) : boxAt(p.w, p.d, p.h)),
   },
   cylinder: {
     name: 'גליל', icon: '🛢️', cat: 'shape',
@@ -423,12 +463,12 @@ function revolveProfile(pts) {
 CATALOG.sketchExtrude = {
   name: 'שרטוט ומשיכה', icon: '✏️', cat: 'custom',
   desc: 'מציירים צורה דו-ממדית ומושכים אותה לגובה. עורכים את הצורה בכפתור "ערוך שרטוט".',
-  params: [P('h', 'גובה משיכה', 10, 0.2, 300, 0.2), P('taper', 'הצרה כלפי מעלה', 0, 0, 90, 1, '%')],
+  params: [P('h', 'גובה משיכה', 10, 0.2, 300, 0.2), P('taper', 'הצרה כלפי מעלה', 0, 0, 90, 1, '%'), ...EDGE_PARAMS()],
   defaultSketch: () => structuredClone(SKETCH_PRESETS.extrude['כוכב']),
   build(p, s, part) {
     const pts = sketchOutline(part?.sketch);
     if (pts.length < 3 || Math.abs(area2(pts)) < 0.01) return boxAt(1, 1, 1);
-    const g = extrudeZ(polygonShape(pts), p.h);
+    const g = extrudeEdged(polygonShape(pts), p.h, p.edgeType, p.edgeR, p.edgeBoth);
     if (p.taper > 0) {
       const pos = g.attributes.position;
       for (let i = 0; i < pos.count; i++) {
@@ -463,6 +503,35 @@ CATALOG.sketchRevolve = {
     const pts = sketchOutline(part?.sketch);
     return selfIntersects(pts) ? ['הפרופיל חותך את עצמו — הגוף עלול לצאת פגום'] : [];
   },
+};
+
+CATALOG.text = {
+  name: 'טקסט', icon: '🔤', cat: 'custom',
+  desc: 'טקסט תלת-ממדי בעברית או באנגלית. לטקסט חרוט — סמן אותו כ"חור" והנח אותו על משטח.',
+  params: [
+    P('size', 'גובה אותיות', 10, 2, 150, 0.5), P('h', 'עובי (בליטה)', 3, 0.4, 50, 0.2),
+    P('spacing', 'ריווח בין אותיות', 0, -20, 100, 1, '%'), ...EDGE_PARAMS(),
+  ],
+  defaultText: 'שלום',
+  build(p, s, part) {
+    const shapes = textShapes(part?.text ?? 'שלום', p.size, p.spacing);
+    if (!shapes.length) return boxAt(1, 1, 0.2);
+    const g = extrudeEdged(shapes, p.h, p.edgeType, Math.min(p.edgeR, p.size * 0.06), p.edgeBoth, 6);
+    g.computeBoundingBox();
+    const c = g.boundingBox.getCenter(new THREE.Vector3());
+    g.translate(-c.x, -c.y, 0);
+    return g;
+  },
+  checks(p, s) {
+    return p.size < 5 ? ['אותיות קטנות מ-5 מ"מ עלולות לצאת לא קריאות'] : [];
+  },
+};
+
+CATALOG.group = {
+  name: 'קבוצה', icon: '🧩', cat: 'none',
+  desc: 'כמה חלקים שאוחדו לגוף אחד. אפשר לפרק בחזרה בכל רגע.',
+  params: [],
+  build: () => boxAt(1, 1, 1), // נבנית באפליקציה מהחלקים שבתוכה
 };
 
 // מודל מיובא (STL) — הקודקודים שמורים בחלק עצמו כ-base64

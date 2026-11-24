@@ -6,7 +6,8 @@ import { STLExporter } from '../vendor/STLExporter.js';
 import { CATALOG, buildGeometry, defaultParams, encodeMesh } from './shapes.js';
 import { STLLoader } from '../vendor/STLLoader.js';
 import { openSketchEditor } from './sketch.js';
-import { combineParts, prep, volumeOf } from './csg.js';
+import { combineParts, prep, volumeOf, unionAll, subtractAll, intersectAll } from './csg.js';
+import { loadFonts } from './text.js';
 
 const STORAGE_KEY = 'print3d.project.v1';
 const MATERIALS = { PLA: 1.24, PETG: 1.27, ABS: 1.04, TPU: 1.21 };
@@ -20,7 +21,10 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 // ---------- מצב ----------
 let state = { name: 'פרויקט חדש', parts: [], settings: { ...DEFAULT_SETTINGS } };
-let selectedId = null;
+let selectedId = null; // החלק הראשי (האחרון שנבחר)
+let selectedIds = new Set(); // כל החלקים הנבחרים
+const isSel = (id) => selectedIds.has(id);
+let gizmoMode = 'translate';
 let resultMode = false;
 const history = { stack: [], index: -1 };
 
@@ -134,7 +138,16 @@ renderer.setAnimationLoop(() => {
 // ---------- גאומטריה וחלקים ----------
 const geoCache = new Map();
 function geometryFor(part) {
-  const key = part.type + JSON.stringify(part.params) + state.settings.tolerance +
+  if (part.type === 'group') {
+    const gkey = 'group' + part.op + JSON.stringify(part.children) + state.settings.tolerance;
+    let gg = geoCache.get(gkey);
+    if (!gg) {
+      gg = buildGroup(part);
+      geoCache.set(gkey, gg);
+    }
+    return gg;
+  }
+  const key = part.type + JSON.stringify(part.params) + state.settings.tolerance + (part.text ?? '') +
     (part.sketch ? JSON.stringify(part.sketch) : '') + (part.mesh ? part.mesh.length + part.mesh.slice(0, 64) + part.mesh.slice(-64) : '');
   let g = geoCache.get(key);
   if (!g) {
@@ -142,6 +155,48 @@ function geometryFor(part) {
     if (!g.attributes.normal) g.computeVertexNormals();
     geoCache.set(key, g);
     if (geoCache.size > 120) geoCache.delete(geoCache.keys().next().value);
+  }
+  return g;
+}
+
+// ---------- קבוצות: כמה חלקים שמאוחדים לגוף אחד ----------
+function partMatrix(p) {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...p.pos),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...p.rot.map(THREE.MathUtils.degToRad), 'XYZ')),
+    new THREE.Vector3(...(p.scale || [1, 1, 1])),
+  );
+}
+
+function flipWinding(g) {
+  const a = g.attributes.position.array;
+  for (let i = 0; i < a.length; i += 9) {
+    for (let k = 0; k < 3; k++) {
+      const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t;
+    }
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+function bakedGeo(p, matrix) {
+  const g = prep(geometryFor(p)).applyMatrix4(matrix);
+  return matrix.determinant() < 0 ? flipWinding(g) : g;
+}
+
+function buildGroup(part) {
+  const solids = [], holes = [];
+  for (const c of part.children || []) (c.hole ? holes : solids).push(bakedGeo(c, partMatrix(c)));
+  let g = null;
+  try {
+    if (solids.length) g = part.op === 'intersect' ? intersectAll(solids) : unionAll(solids);
+    if (g && holes.length) g = subtractAll(g, holes);
+  } catch (err) {
+    console.error(err);
+  }
+  if (!g || !g.attributes.position.count) {
+    g = new THREE.BoxGeometry(1, 1, 1);
+    g.translate(0, 0, 0.5);
   }
   return g;
 }
@@ -199,7 +254,7 @@ function syncMesh(part) {
   let mesh = meshes.get(part.id);
   const geo = geometryFor(part);
   if (!mesh) {
-    mesh = new THREE.Mesh(geo, materialFor(part, part.id === selectedId));
+    mesh = new THREE.Mesh(geo, materialFor(part, isSel(part.id)));
     mesh.userData.id = part.id;
     meshes.set(part.id, mesh);
     partsGroup.add(mesh);
@@ -213,7 +268,7 @@ function syncMesh(part) {
     mesh.add(edgesFor(geo));
   }
   mesh.material.dispose();
-  mesh.material = materialFor(part, part.id === selectedId);
+  mesh.material = materialFor(part, isSel(part.id));
   mesh.position.fromArray(part.pos);
   mesh.rotation.set(...part.rot.map(THREE.MathUtils.degToRad), 'XYZ');
   mesh.scale.fromArray(part.scale || [1, 1, 1]);
@@ -232,6 +287,8 @@ function syncAll() {
   }
   state.parts.forEach(syncMesh);
   if (selectedId && !ids.has(selectedId)) selectedId = null;
+  for (const id of [...selectedIds]) if (!ids.has(id)) selectedIds.delete(id);
+  if (!selectedId && selectedIds.size) selectedId = [...selectedIds].pop();
   attachGizmo();
   renderPartsList();
 }
@@ -244,17 +301,8 @@ function worldGeo(part) {
   const mesh = meshes.get(part.id) || syncMesh(part);
   mesh.updateMatrixWorld(true);
   const g = prep(mesh.geometry).applyMatrix4(mesh.matrixWorld);
-  if (mesh.matrixWorld.determinant() < 0) {
-    // שיקוף הופך את כיוון המשולשים — מחזירים אותו כדי שהגוף יישאר תקין
-    const a = g.attributes.position.array;
-    for (let i = 0; i < a.length; i += 9) {
-      for (let k = 0; k < 3; k++) {
-        const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t;
-      }
-    }
-    g.computeVertexNormals();
-  }
-  return g;
+  // שיקוף הופך את כיוון המשולשים — מחזירים אותו כדי שהגוף יישאר תקין
+  return mesh.matrixWorld.determinant() < 0 ? flipWinding(g) : g;
 }
 
 function solidsBox(parts = state.parts.filter((p) => !p.hole)) {
@@ -444,6 +492,7 @@ function addPart(type, extra = null) {
     scale: [1, 1, 1],
   };
   if (def.defaultSketch) part.sketch = def.defaultSketch();
+  if (def.defaultText) part.text = def.defaultText;
   if (extra) Object.assign(part, extra);
   if (state.parts.length) part.pos = findFreeSpot(geometryFor(part));
   state.parts.push(part);
@@ -483,8 +532,33 @@ function findFreeSpot(geo) {
   return [r2(all.max.x + gap - gb.min.x), 0, 0];
 }
 
+function deleteSelected() {
+  if (!selectedIds.size) return;
+  const n = selectedIds.size;
+  state.parts = state.parts.filter((p) => !selectedIds.has(p.id));
+  selectedIds.clear();
+  selectedId = null;
+  syncAll();
+  renderProps();
+  commit();
+  if (n > 1) toast(`נמחקו ${n} חלקים`);
+}
+
+function duplicateSelected() {
+  const src = state.parts.filter((p) => selectedIds.has(p.id));
+  if (!src.length) return;
+  const copies = src.map((p) => ({ ...JSON.parse(JSON.stringify(p)), id: uid(), pos: [r2(p.pos[0] + 10), r2(p.pos[1] + 10), p.pos[2]] }));
+  state.parts.push(...copies);
+  selectedIds = new Set(copies.map((c) => c.id));
+  selectedId = copies[copies.length - 1].id;
+  syncAll();
+  renderProps();
+  commit();
+}
+
 function deletePart(id) {
   state.parts = state.parts.filter((p) => p.id !== id);
+  selectedIds.delete(id);
   if (selectedId === id) selectedId = null;
   syncAll();
   renderProps();
@@ -541,24 +615,73 @@ function rotatePart(part, axis, by) {
 }
 
 // ---------- בחירה וגרירה ----------
-function select(id) {
-  const prev = selectedId;
-  selectedId = id;
-  if (prev && partById(prev)) syncMesh(partById(prev));
-  if (id && partById(id)) syncMesh(partById(id));
+// additive: Shift/Ctrl — מוסיף או מסיר מהבחירה
+function select(id, additive = false) {
+  const before = new Set(selectedIds);
+  if (!additive) {
+    selectedIds = new Set(id ? [id] : []);
+    selectedId = id;
+  } else if (id) {
+    if (selectedIds.has(id)) {
+      selectedIds.delete(id);
+      selectedId = [...selectedIds].pop() || null;
+    } else {
+      selectedIds.add(id);
+      selectedId = id;
+    }
+  }
+  for (const x of new Set([...before, ...selectedIds])) {
+    const p = partById(x);
+    if (p) syncMesh(p);
+  }
   attachGizmo();
   renderPartsList();
   renderProps();
 }
 
+const pivot = new THREE.Object3D();
+scene.add(pivot);
+let multiDrag = null;
+
+function selectionBox(ids = selectedIds) {
+  const box = new THREE.Box3();
+  ids.forEach((id) => {
+    const m = meshes.get(id);
+    if (m) box.expandByObject(m, true);
+  });
+  return box;
+}
+
 function attachGizmo() {
-  const mesh = selectedId && !resultMode ? meshes.get(selectedId) : null;
+  if (resultMode || !selectedIds.size) {
+    tc.detach();
+    return;
+  }
+  if (selectedIds.size > 1) {
+    // כמה חלקים: גוררים את כולם יחד (הזזה בלבד)
+    const box = selectionBox();
+    box.getCenter(pivot.position);
+    pivot.updateMatrixWorld();
+    tc.setMode('translate');
+    tc.attach(pivot);
+    return;
+  }
+  tc.setMode(gizmoMode);
+  const mesh = meshes.get(selectedId);
   if (mesh) tc.attach(mesh);
   else tc.detach();
 }
 
 tc.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value;
+  if (e.value && selectedIds.size > 1) {
+    multiDrag = { start: pivot.position.clone(), pos: new Map([...selectedIds].map((id) => [id, [...partById(id).pos]])) };
+  }
+  if (!e.value && multiDrag) {
+    multiDrag = null;
+    commit();
+    return;
+  }
   if (!e.value) {
     const part = partById(selectedId);
     if (part && tc.mode !== 'translate') dropPart(part);
@@ -567,6 +690,18 @@ tc.addEventListener('dragging-changed', (e) => {
   }
 });
 tc.addEventListener('objectChange', () => {
+  if (multiDrag) {
+    const d = pivot.position.clone().sub(multiDrag.start);
+    for (const [id, p0] of multiDrag.pos) {
+      const part = partById(id);
+      if (!part) continue;
+      part.pos = [r2(p0[0] + d.x), r2(p0[1] + d.y), r2(p0[2] + d.z)];
+      const m = meshes.get(id);
+      m.position.fromArray(part.pos);
+      m.updateMatrixWorld(true);
+    }
+    return;
+  }
   const part = partById(selectedId);
   const mesh = meshes.get(selectedId);
   if (!part || !mesh) return;
@@ -577,7 +712,8 @@ tc.addEventListener('objectChange', () => {
 });
 
 function setGizmoMode(mode) {
-  tc.setMode(mode);
+  gizmoMode = mode;
+  if (selectedIds.size <= 1) tc.setMode(mode);
   $('modeMove').classList.toggle('active', mode === 'translate');
   $('modeRotate').classList.toggle('active', mode === 'rotate');
   $('modeScale').classList.toggle('active', mode === 'scale');
@@ -598,7 +734,9 @@ renderer.domElement.addEventListener('pointerup', (e) => {
   const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   ray.setFromCamera(ndc, camera);
   const hits = ray.intersectObjects([...meshes.values()], false);
-  select(hits.length ? hits[0].object.userData.id : null);
+  const additive = e.shiftKey || e.ctrlKey || e.metaKey;
+  if (!hits.length && additive) return;
+  select(hits.length ? hits[0].object.userData.id : null, additive);
 });
 
 // ---------- ממשק: קטלוג ורשימת חלקים ----------
@@ -715,7 +853,8 @@ function renderPartsList() {
   for (const p of state.parts) {
     const li = document.createElement('li');
     const b = document.createElement('button');
-    b.className = p.id === selectedId ? 'sel' : '';
+    b.className = isSel(p.id) ? 'sel' : '';
+    b.title = 'Shift או Ctrl + לחיצה — בחירת כמה חלקים';
     const sw = document.createElement('span');
     sw.className = 'swatch';
     sw.style.background = p.hole ? 'transparent' : p.color;
@@ -729,9 +868,9 @@ function renderPartsList() {
       bd.textContent = 'חור';
       b.appendChild(bd);
     }
-    b.addEventListener('click', () => {
+    b.addEventListener('click', (e) => {
       if (resultMode) setResultMode(false);
-      select(p.id);
+      select(p.id, e.shiftKey || e.ctrlKey || e.metaKey);
     });
     li.appendChild(b);
     ul.appendChild(li);
@@ -741,6 +880,10 @@ function renderPartsList() {
 // ---------- ממשק: פאנל מאפיינים ----------
 function renderProps() {
   const el = $('props');
+  if (selectedIds.size > 1) {
+    renderMultiProps(el);
+    return;
+  }
   const part = partById(selectedId);
   if (!part) {
     el.innerHTML = `
@@ -754,6 +897,8 @@ function renderProps() {
         <kbd>←↑→↓</kbd> הזזה במ"מ (<kbd>Shift</kbd> = 10)<br>
         <kbd>PgUp</kbd>/<kbd>PgDn</kbd> למעלה/למטה<br>
         <kbd>Ctrl+D</kbd> שכפול · <kbd>Delete</kbd> מחיקה<br>
+        <kbd>Shift</kbd>+לחיצה: בחירת כמה חלקים · <kbd>Ctrl+A</kbd> הכול<br>
+        <kbd>Ctrl+G</kbd> קיבוץ · <kbd>Ctrl+Shift+G</kbd> פירוק<br>
         <kbd>Ctrl+Z</kbd> ביטול · <kbd>Ctrl+Y</kbd> חזרה<br>
         גרירה בעכבר: סיבוב מבט · ימני: הזזת מבט · גלגלת: זום
       </div>`;
@@ -784,6 +929,51 @@ function renderProps() {
   nameGroup.appendChild(nameIn);
   el.appendChild(nameGroup);
 
+  if (part.type === 'group') {
+    const gr = group(`קבוצה של ${part.children.length} חלקים`);
+    const opSel = document.createElement('select');
+    opSel.id = 'grpOp';
+    opSel.setAttribute('aria-label', 'פעולה');
+    opSel.innerHTML = '<option value="union">חיבור — כל המוצקים יחד, החורים נחתכים</option><option value="intersect">חיתוך משותף — רק הנפח שמשותף לכולם</option>';
+    opSel.value = part.op || 'union';
+    opSel.addEventListener('change', () => {
+      part.op = opSel.value;
+      syncMesh(part);
+      dropPart(part);
+      renderProps();
+      commit();
+    });
+    gr.appendChild(opSel);
+    const ub = document.createElement('button');
+    ub.style.cssText = 'width:100%;margin-top:8px';
+    ub.textContent = '🧩 פרק קבוצה (Ctrl+Shift+G)';
+    ub.addEventListener('click', () => ungroup(part));
+    gr.appendChild(ub);
+    el.appendChild(gr);
+  }
+
+  if (def.defaultText !== undefined) {
+    const tg = group('טקסט');
+    const ti = document.createElement('input');
+    ti.type = 'text';
+    ti.id = 'partText';
+    ti.dir = 'auto';
+    ti.value = part.text ?? '';
+    ti.setAttribute('aria-label', 'הטקסט');
+    ti.style.fontSize = '16px';
+    let tt = null;
+    ti.addEventListener('input', () => {
+      clearTimeout(tt);
+      tt = setTimeout(() => {
+        part.text = ti.value;
+        syncMesh(part);
+        commit();
+      }, 250);
+    });
+    tg.appendChild(ti);
+    el.appendChild(tg);
+  }
+
   if (def.defaultSketch) {
     const sk = group('שרטוט');
     const b = document.createElement('button');
@@ -799,6 +989,27 @@ function renderProps() {
   const dims = group('מידות');
   if (!def.params.length) dims.hidden = true;
   for (const q of def.params) {
+    if ((q.key === 'edgeR' || q.key === 'edgeBoth') && !p.edgeType) continue;
+    if (q.options) {
+      const row = document.createElement('div');
+      row.className = 'param';
+      const sid = `p_${q.key}`;
+      row.innerHTML = `<label for="${sid}">${q.label}</label>`;
+      const sel = document.createElement('select');
+      sel.id = sid;
+      sel.style.gridColumn = '1 / -1';
+      q.options.forEach(([v, t]) => sel.add(new Option(t, v)));
+      sel.value = p[q.key];
+      sel.addEventListener('change', () => {
+        part.params[q.key] = Number(sel.value);
+        syncMesh(part);
+        renderProps();
+        commit();
+      });
+      row.appendChild(sel);
+      dims.appendChild(row);
+      continue;
+    }
     const row = document.createElement('div');
     row.className = 'param';
     const idR = `p_${q.key}`;
@@ -998,6 +1209,155 @@ function renderProps() {
   el.appendChild(act);
 }
 
+function renderMultiProps(el) {
+  const parts = state.parts.filter((p) => selectedIds.has(p.id));
+  const first = parts.find((p) => p.id === [...selectedIds][0]);
+  el.innerHTML = '';
+  const head = document.createElement('div');
+  head.innerHTML = `<div class="props-head"><span class="ic" aria-hidden="true">🧩</span><h2>${parts.length} חלקים נבחרו</h2></div>
+    <p class="props-desc">גרירה בתצוגה מזיזה את כולם יחד. Shift או Ctrl + לחיצה מוסיף או מסיר חלק.</p>`;
+  el.appendChild(head);
+
+  const comb = group('שילוב לגוף אחד');
+  const mk = (txt, title, fn) => {
+    const b = document.createElement('button');
+    b.textContent = txt;
+    b.title = title;
+    b.style.width = '100%';
+    b.addEventListener('click', fn);
+    return b;
+  };
+  const col = document.createElement('div');
+  col.style.cssText = 'display:flex;flex-direction:column;gap:6px';
+  col.append(
+    mk('🧩 קבץ — חיבור (Ctrl+G)', 'מחבר את כל המוצקים לגוף אחד; חלקים שמסומנים כחור נחתכים', () => groupSelected('union')),
+    mk(`➖ חסר מ"${first?.name || 'הראשון'}"`, 'החלק הראשון שבחרת נשאר, וכל השאר נחתכים ממנו', () => groupSelected('union', true)),
+    mk('∩ חיתוך משותף', 'נשאר רק הנפח שמשותף לכל החלקים', () => groupSelected('intersect')),
+  );
+  comb.appendChild(col);
+  const hint = document.createElement('p');
+  hint.className = 'hint';
+  hint.textContent = 'קבוצה נשארת ניתנת לעריכה: אפשר לפרק אותה בחזרה לחלקים בכל רגע.';
+  comb.appendChild(hint);
+  el.appendChild(comb);
+
+  const al = group('יישור');
+  const rows = [
+    ['X', 0, ['ימין', 'max'], ['מרכז', 'center'], ['שמאל', 'min']],
+    ['Y', 1, ['אחורה', 'max'], ['מרכז', 'center'], ['קדימה', 'min']],
+    ['Z', 2, ['למעלה', 'max'], ['מרכז', 'center'], ['תחתית', 'min']],
+  ];
+  for (const [ax, i, ...opts] of rows) {
+    const r = document.createElement('div');
+    r.className = 'row';
+    r.style.marginBottom = '6px';
+    const lb = document.createElement('span');
+    lb.textContent = ax;
+    lb.style.cssText = 'width:18px;color:var(--muted);font-weight:600';
+    r.appendChild(lb);
+    for (const [t, w] of opts) {
+      const b = document.createElement('button');
+      b.textContent = t;
+      b.addEventListener('click', () => alignSelected(i, w));
+      r.appendChild(b);
+    }
+    al.appendChild(r);
+  }
+  el.appendChild(al);
+
+  const act = group('');
+  const r1 = document.createElement('div');
+  r1.className = 'row';
+  const allHoles = parts.every((p) => p.hole);
+  r1.append(
+    mk(allHoles ? 'סמן כמוצקים' : 'סמן כחורים', '', () => {
+      parts.forEach((p) => { p.hole = !allHoles; syncMesh(p); });
+      renderPartsList();
+      renderProps();
+      commit();
+    }),
+  );
+  const r2b = document.createElement('div');
+  r2b.className = 'row';
+  r2b.style.marginTop = '6px';
+  const del = mk('🗑 מחק הכול', '', deleteSelected);
+  del.classList.add('danger');
+  r2b.append(mk('⧉ שכפל הכול', '', duplicateSelected), del);
+  act.append(r1, r2b);
+  el.appendChild(act);
+}
+
+function groupSelected(op = 'union', subtractRest = false) {
+  const order = [...selectedIds];
+  const parts = order.map(partById).filter(Boolean);
+  if (parts.length < 2) return;
+  const box = selectionBox();
+  const c = box.getCenter(new THREE.Vector3());
+  const o = [r2(c.x), r2(c.y), r2(box.min.z)];
+  const children = parts.map((p, i) => {
+    const ch = JSON.parse(JSON.stringify(p));
+    ch.pos = [r2(p.pos[0] - o[0]), r2(p.pos[1] - o[1]), r2(p.pos[2] - o[2])];
+    if (subtractRest) ch.hole = i > 0;
+    return ch;
+  });
+  const base = subtractRest ? parts[0] : parts.find((p) => !p.hole) || parts[0];
+  const g = {
+    id: uid(), type: 'group', params: {}, pos: o, rot: [0, 0, 0], scale: [1, 1, 1],
+    name: op === 'intersect' ? 'חיתוך משותף' : subtractRest ? `${base.name} (חיסור)` : 'קבוצה',
+    color: base.color, hole: false, op, children,
+  };
+  const idx = Math.min(...parts.map((p) => state.parts.indexOf(p)));
+  state.parts = state.parts.filter((p) => !selectedIds.has(p.id));
+  state.parts.splice(idx, 0, g);
+  selectedIds = new Set([g.id]);
+  selectedId = g.id;
+  syncAll();
+  renderProps();
+  commit();
+  toast(`נוצרה ${g.name} מ-${parts.length} חלקים`);
+}
+
+function ungroup(part) {
+  if (part.type !== 'group') return;
+  const gm = partMatrix(part);
+  const kids = part.children.map((c) => {
+    const m = gm.clone().multiply(partMatrix(c));
+    const pos = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    m.decompose(pos, q, sc);
+    const e = new THREE.Euler().setFromQuaternion(q, 'XYZ');
+    return {
+      ...c, id: uid(),
+      pos: pos.toArray().map(r2),
+      rot: [e.x, e.y, e.z].map((r) => Math.round(THREE.MathUtils.radToDeg(r) * 10) / 10),
+      scale: sc.toArray().map((v) => Math.round(v * 1000) / 1000),
+      hole: part.hole || c.hole,
+    };
+  });
+  const idx = state.parts.indexOf(part);
+  state.parts.splice(idx, 1, ...kids);
+  selectedIds = new Set(kids.map((k) => k.id));
+  selectedId = kids[kids.length - 1].id;
+  syncAll();
+  renderProps();
+  commit();
+  toast(`הקבוצה פורקה ל-${kids.length} חלקים`);
+}
+
+function alignSelected(axis, where) {
+  const parts = state.parts.filter((p) => selectedIds.has(p.id));
+  const all = selectionBox();
+  const key = ['x', 'y', 'z'][axis];
+  const target = where === 'min' ? all.min[key] : where === 'max' ? all.max[key] : (all.min[key] + all.max[key]) / 2;
+  for (const p of parts) {
+    const b = new THREE.Box3().expandByObject(meshes.get(p.id), true);
+    const cur = where === 'min' ? b.min[key] : where === 'max' ? b.max[key] : (b.min[key] + b.max[key]) / 2;
+    p.pos[axis] = r2(p.pos[axis] + target - cur);
+    syncMesh(p);
+  }
+  attachGizmo();
+  commit();
+}
+
 function group(title) {
   const g = document.createElement('div');
   g.className = 'group';
@@ -1097,9 +1457,12 @@ function loadProjectData(data) {
       scale: (p.scale || [1, 1, 1]).map(Number),
       ...(p.sketch ? { sketch: p.sketch } : {}),
       ...(p.mesh ? { mesh: String(p.mesh) } : {}),
+      ...(p.text !== undefined ? { text: String(p.text) } : {}),
+      ...(p.type === 'group' ? { op: p.op === 'intersect' ? 'intersect' : 'union', children: Array.isArray(p.children) ? p.children.filter((c) => CATALOG[c.type]) : [] } : {}),
     }));
   state = { name: String(data.name || 'פרויקט'), parts, settings: { ...DEFAULT_SETTINGS, ...(data.settings || {}) } };
   selectedId = null;
+  selectedIds = new Set();
   $('projectName').value = state.name;
   buildBed();
   syncAll();
@@ -1189,10 +1552,20 @@ window.addEventListener('keydown', (e) => {
     saveProject();
   } else if (mod && e.key.toLowerCase() === 'd' && part) {
     e.preventDefault();
-    duplicatePart(part.id);
+    duplicateSelected();
+  } else if (mod && e.key.toLowerCase() === 'a') {
+    e.preventDefault();
+    selectedIds = new Set(state.parts.map((p) => p.id));
+    selectedId = state.parts.length ? state.parts[state.parts.length - 1].id : null;
+    syncAll();
+    renderProps();
+  } else if (mod && e.key.toLowerCase() === 'g') {
+    e.preventDefault();
+    if (e.shiftKey) { if (part?.type === 'group') ungroup(part); }
+    else groupSelected('union');
   } else if ((e.key === 'Delete' || e.key === 'Backspace') && part) {
     e.preventDefault();
-    deletePart(part.id);
+    deleteSelected();
   } else if (e.key === 'Escape') {
     select(null);
   } else if (e.key.toLowerCase() === 'w') {
@@ -1205,8 +1578,12 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     const st = e.shiftKey ? 10 : 1;
     const d = { ArrowLeft: [0, -st], ArrowRight: [0, st], ArrowUp: [1, st], ArrowDown: [1, -st], PageUp: [2, st], PageDown: [2, -st] }[e.key];
-    part.pos[d[0]] = r2(part.pos[d[0]] + d[1]);
-    syncMesh(part);
+    for (const id of selectedIds) {
+      const p = partById(id);
+      p.pos[d[0]] = r2(p.pos[d[0]] + d[1]);
+      syncMesh(p);
+    }
+    attachGizmo();
     updateTransformInputs(part);
     commit(400);
   }
@@ -1239,6 +1616,14 @@ function init() {
   homeView();
   pushHistory();
   scheduleStats();
+  loadFonts()
+    .then(() => {
+      geoCache.clear();
+      syncAll();
+      renderProps();
+      scheduleStats();
+    })
+    .catch(() => toast('גופן הטקסט לא נטען — טקסט לא יוצג'));
 }
 init();
 
