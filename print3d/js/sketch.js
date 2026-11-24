@@ -16,6 +16,7 @@ export function openSketchEditor({ sketch, revolve = false, title = 'עריכת 
   // ---------- DOM ----------
   const ov = document.createElement('div');
   ov.className = 'sk-overlay';
+  ov.dir = 'rtl';
   ov.setAttribute('role', 'dialog');
   ov.setAttribute('aria-label', title);
   const presets = SKETCH_PRESETS[revolve ? 'revolve' : 'extrude'];
