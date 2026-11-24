@@ -30,6 +30,7 @@
       <button id="btnOpen">פתח…</button>
       <button id="btnSave">שמור פרויקט</button>
       <input id="fileOpen" type="file" accept=".json,application/json" hidden>
+      <input id="fileStl" type="file" accept=".stl,model/stl" hidden>
       <span class="sep"></span>
       <button id="btnSettings">⚙ מדפסת</button>
       <button id="btnExport" class="primary">⬇ ייצוא STL</button>
@@ -41,6 +42,7 @@
       <div class="tabs" role="tablist">
         <button role="tab" class="tab active" data-tab="product" aria-selected="true">מוצרים</button>
         <button role="tab" class="tab" data-tab="shape" aria-selected="false">צורות</button>
+        <button role="tab" class="tab" data-tab="custom" aria-selected="false">חופשי</button>
       </div>
       <div id="catalog" class="catalog"></div>
 
@@ -55,6 +57,7 @@
         <div class="seg" role="group" aria-label="מצב גרירה">
           <button id="modeMove" class="active" title="הזזה (W)">✥ הזזה</button>
           <button id="modeRotate" title="סיבוב (E)">⟳ סיבוב</button>
+          <button id="modeScale" title="שינוי גודל (R)">⤡ גודל</button>
         </div>
         <button id="btnResult" title="הצג את התוצאה הסופית אחרי חיבור וחיסור">👁 תצוגת תוצאה</button>
         <button id="btnDrop" title="הנח את כל המודל על משטח ההדפסה">⤓ הנח על המשטח</button>

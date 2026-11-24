@@ -14,6 +14,9 @@
   --ok-ink: #1d6b3a;
   --view: #e9ecf1;
   --radius: 10px;
+  --grid-minor: rgba(120, 130, 150, .18);
+  --grid-major: rgba(120, 130, 150, .42);
+  --sk-fill: rgba(47, 111, 237, .14);
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -30,11 +33,15 @@
     --ok-bg: #173323;
     --ok-ink: #8fdcaa;
     --view: #1f242d;
+    --grid-minor: rgba(160, 170, 190, .12);
+    --grid-major: rgba(160, 170, 190, .3);
+    --sk-fill: rgba(91, 140, 255, .2);
     color-scheme: dark;
   }
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg);
@@ -182,3 +189,39 @@ dialog::backdrop { background: rgba(0,0,0,.35); }
   .warnings { max-width: 60%; }
   .stats { font-size: 11.5px; }
 }
+
+/* עורך השרטוט */
+.sk-overlay {
+  position: fixed; inset: 0; z-index: 20; background: var(--bg);
+  display: flex; flex-direction: column;
+}
+.sk-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.sk-title { font-size: 15px; margin-inline-end: 6px; }
+.sk-ctl { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.sk-ctl select { width: auto; }
+.sk-spacer { flex: 1; }
+.sk-main { position: relative; flex: 1; min-height: 0; }
+.sk-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; outline: none; }
+.sk-help {
+  position: absolute; top: 10px; inset-inline-start: 10px; max-width: min(560px, calc(100% - 20px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; color: var(--muted); line-height: 1.7; pointer-events: none;
+}
+.sk-info {
+  position: absolute; bottom: 10px; inset-inline-end: 10px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 10px; font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.sk-info.bad { background: var(--warn-bg); color: var(--warn-ink); }
+.sk-point {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+  background: var(--panel); border-top: 1px solid var(--line); font-size: 13px;
+}
+.sk-point label { display: flex; align-items: center; gap: 4px; }
+.sk-point input { width: 80px; }
+.sk-point.off { opacity: .45; pointer-events: none; }

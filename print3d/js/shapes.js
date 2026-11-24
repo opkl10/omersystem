@@ -365,12 +365,145 @@ export const CATALOG = {
   },
 };
 
+// ===== מידול חופשי: שרטוט דו-ממדי שהופך לגוף =====
+// sketch = { points: [[x, y], ...], smooth: bool } — מצולע סגור במ"מ
+
+// מחזיר את קו המתאר בפועל (אם "חלק" — עקומה עוברת דרך הנקודות)
+export function sketchOutline(sketch, perSeg = 12) {
+  const pts = sketch?.points || [];
+  if (!sketch?.smooth || pts.length < 3) return pts.map((p) => [...p]);
+  const curve = new THREE.CatmullRomCurve3(pts.map(([x, y]) => new THREE.Vector3(x, y, 0)), true, 'centripetal');
+  return curve.getPoints(pts.length * perSeg).slice(0, -1).map((v) => [v.x, v.y]);
+}
+
+export function polygonArea(pts) {
+  return area2(pts) / 2;
+}
+
+// בדיקה אם המצולע חותך את עצמו
+export function selfIntersects(pts) {
+  const n = pts.length;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const inter = (p1, p2, p3, p4) => {
+    const d1 = cross(p3, p4, p1), d2 = cross(p3, p4, p2), d3 = cross(p1, p2, p3), d4 = cross(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue;
+      if (inter(pts[i], pts[(i + 1) % n], pts[j], pts[(j + 1) % n])) return true;
+    }
+  }
+  return false;
+}
+
+export const SKETCH_PRESETS = {
+  extrude: {
+    'מלבן': { points: [[-20, -12], [20, -12], [20, 12], [-20, 12]], smooth: false },
+    'משושה': { points: Array.from({ length: 6 }, (_, i) => [20 * Math.cos((i * Math.PI) / 3), 20 * Math.sin((i * Math.PI) / 3)].map((v) => Math.round(v * 10) / 10)), smooth: false },
+    'כוכב': { points: Array.from({ length: 10 }, (_, i) => { const r = i % 2 ? 9 : 22, a = Math.PI / 2 + (i * Math.PI) / 5; return [Math.round(r * Math.cos(a) * 10) / 10, Math.round(r * Math.sin(a) * 10) / 10]; }), smooth: false },
+    'צורת L': { points: [[-20, -20], [20, -20], [20, -10], [-10, -10], [-10, 20], [-20, 20]], smooth: false },
+    'עיגול': { points: Array.from({ length: 8 }, (_, i) => [Math.round(20 * Math.cos((i * Math.PI) / 4) * 10) / 10, Math.round(20 * Math.sin((i * Math.PI) / 4) * 10) / 10]), smooth: true },
+    'לב': { points: [[0, -20], [16, -4], [18, 8], [10, 15], [0, 9], [-10, 15], [-18, 8], [-16, -4]], smooth: true },
+  },
+  revolve: {
+    'אגרטל': { points: [[0, 0], [18, 0], [24, 20], [14, 45], [16, 60], [14, 60], [12, 45], [22, 20], [16, 2], [0, 2]], smooth: false },
+    'כפתור / ידית': { points: [[0, 0], [8, 0], [8, 6], [16, 10], [16, 18], [0, 18]], smooth: false },
+    'גביע': { points: [[0, 0], [20, 0], [20, 2], [4, 4], [4, 30], [22, 40], [26, 60], [24, 60], [20, 42], [0, 34]], smooth: false },
+  },
+};
+
+// גוף סיבוב מפרופיל (r, z): r חייב להיות 0 ומעלה
+function revolveProfile(pts) {
+  let prof = pts.map(([r, z]) => [Math.max(0, r), z]);
+  if (area2(prof) < 0) prof = prof.reverse();
+  return latheZ(prof);
+}
+
+CATALOG.sketchExtrude = {
+  name: 'שרטוט ומשיכה', icon: '✏️', cat: 'custom',
+  desc: 'מציירים צורה דו-ממדית ומושכים אותה לגובה. עורכים את הצורה בכפתור "ערוך שרטוט".',
+  params: [P('h', 'גובה משיכה', 10, 0.2, 300, 0.2), P('taper', 'הצרה כלפי מעלה', 0, 0, 90, 1, '%')],
+  defaultSketch: () => structuredClone(SKETCH_PRESETS.extrude['כוכב']),
+  build(p, s, part) {
+    const pts = sketchOutline(part?.sketch);
+    if (pts.length < 3 || Math.abs(area2(pts)) < 0.01) return boxAt(1, 1, 1);
+    const g = extrudeZ(polygonShape(pts), p.h);
+    if (p.taper > 0) {
+      const pos = g.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const f = 1 - (p.taper / 100) * (pos.getZ(i) / p.h);
+        pos.setXY(i, pos.getX(i) * f, pos.getY(i) * f);
+      }
+      g.computeVertexNormals();
+    }
+    return g;
+  },
+  checks(p, s, part) {
+    const pts = sketchOutline(part?.sketch);
+    return selfIntersects(pts) ? ['השרטוט חותך את עצמו — הגוף עלול לצאת פגום. ערוך את הנקודות.'] : [];
+  },
+};
+
+CATALOG.sketchRevolve = {
+  name: 'שרטוט וסיבוב', icon: '🏺', cat: 'custom',
+  desc: 'מציירים חצי חתך (פרופיל) והוא מסתובב סביב ציר אנכי — לאגרטלים, ידיות, כוסות וגביעים.',
+  params: [],
+  revolve: true,
+  defaultSketch: () => structuredClone(SKETCH_PRESETS.revolve['אגרטל']),
+  build(p, s, part) {
+    const pts = sketchOutline(part?.sketch);
+    if (pts.length < 3 || Math.abs(area2(pts)) < 0.01) return boxAt(1, 1, 1);
+    const g = revolveProfile(pts);
+    g.computeBoundingBox();
+    g.translate(0, 0, -g.boundingBox.min.z);
+    return g;
+  },
+  checks(p, s, part) {
+    const pts = sketchOutline(part?.sketch);
+    return selfIntersects(pts) ? ['הפרופיל חותך את עצמו — הגוף עלול לצאת פגום'] : [];
+  },
+};
+
+// מודל מיובא (STL) — הקודקודים שמורים בחלק עצמו כ-base64
+const meshCache = new Map();
+export function encodeMesh(positions) {
+  const u8 = new Uint8Array(positions.buffer, positions.byteOffset, positions.byteLength);
+  let s = '';
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function decodeMesh(b64) {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return new Float32Array(u8.buffer);
+}
+
+CATALOG.mesh = {
+  name: 'מודל מיובא', icon: '📥', cat: 'none',
+  desc: 'קובץ STL שיובא. אפשר להזיז, לסובב, לשנות גודל ולחתוך בו חורים.',
+  params: [],
+  build(p, s, part) {
+    const key = part?.mesh;
+    if (!key) return boxAt(1, 1, 1);
+    let g = meshCache.get(key);
+    if (!g) {
+      g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(decodeMesh(key), 3));
+      g.computeVertexNormals();
+      meshCache.set(key, g);
+    }
+    return g;
+  },
+};
+
 export function defaultParams(type) {
   return Object.fromEntries(CATALOG[type].params.map((q) => [q.key, q.def]));
 }
 
-export function buildGeometry(type, params, settings) {
+export function buildGeometry(type, params, settings, part) {
   const def = CATALOG[type];
   const p = { ...defaultParams(type), ...params };
-  return def.build(p, settings);
+  return def.build(p, settings, part);
 }

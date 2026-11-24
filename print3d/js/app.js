@@ -3,7 +3,9 @@ import * as THREE from 'three';
 import { OrbitControls } from '../vendor/OrbitControls.js';
 import { TransformControls } from '../vendor/TransformControls.js';
 import { STLExporter } from '../vendor/STLExporter.js';
-import { CATALOG, buildGeometry, defaultParams } from './shapes.js';
+import { CATALOG, buildGeometry, defaultParams, encodeMesh } from './shapes.js';
+import { STLLoader } from '../vendor/STLLoader.js';
+import { openSketchEditor } from './sketch.js';
 import { combineParts, prep, volumeOf } from './csg.js';
 
 const STORAGE_KEY = 'print3d.project.v1';
@@ -52,6 +54,7 @@ let resultMesh = null;
 const tc = new TransformControls(camera, renderer.domElement);
 tc.setTranslationSnap(1);
 tc.setRotationSnap(THREE.MathUtils.degToRad(15));
+tc.setScaleSnap(0.05);
 tc.setSize(0.8);
 scene.add(tc.getHelper());
 
@@ -131,10 +134,11 @@ renderer.setAnimationLoop(() => {
 // ---------- גאומטריה וחלקים ----------
 const geoCache = new Map();
 function geometryFor(part) {
-  const key = part.type + JSON.stringify(part.params) + state.settings.tolerance;
+  const key = part.type + JSON.stringify(part.params) + state.settings.tolerance +
+    (part.sketch ? JSON.stringify(part.sketch) : '') + (part.mesh ? part.mesh.length + part.mesh.slice(0, 64) + part.mesh.slice(-64) : '');
   let g = geoCache.get(key);
   if (!g) {
-    g = buildGeometry(part.type, part.params, state.settings);
+    g = buildGeometry(part.type, part.params, state.settings, part);
     if (!g.attributes.normal) g.computeVertexNormals();
     geoCache.set(key, g);
     if (geoCache.size > 120) geoCache.delete(geoCache.keys().next().value);
@@ -212,6 +216,7 @@ function syncMesh(part) {
   mesh.material = materialFor(part, part.id === selectedId);
   mesh.position.fromArray(part.pos);
   mesh.rotation.set(...part.rot.map(THREE.MathUtils.degToRad), 'XYZ');
+  mesh.scale.fromArray(part.scale || [1, 1, 1]);
   mesh.updateMatrixWorld(true);
   return mesh;
 }
@@ -238,7 +243,18 @@ function partById(id) {
 function worldGeo(part) {
   const mesh = meshes.get(part.id) || syncMesh(part);
   mesh.updateMatrixWorld(true);
-  return prep(mesh.geometry).applyMatrix4(mesh.matrixWorld);
+  const g = prep(mesh.geometry).applyMatrix4(mesh.matrixWorld);
+  if (mesh.matrixWorld.determinant() < 0) {
+    // שיקוף הופך את כיוון המשולשים — מחזירים אותו כדי שהגוף יישאר תקין
+    const a = g.attributes.position.array;
+    for (let i = 0; i < a.length; i += 9) {
+      for (let k = 0; k < 3; k++) {
+        const t = a[i + 3 + k]; a[i + 3 + k] = a[i + 6 + k]; a[i + 6 + k] = t;
+      }
+    }
+    g.computeVertexNormals();
+  }
+  return g;
 }
 
 function solidsBox(parts = state.parts.filter((p) => !p.hole)) {
@@ -306,7 +322,7 @@ function updateStats() {
   }
   for (const p of state.parts) {
     if (p.hole) continue;
-    const chk = CATALOG[p.type].checks?.({ ...defaultParams(p.type), ...p.params }, s) || [];
+    const chk = CATALOG[p.type].checks?.({ ...defaultParams(p.type), ...p.params }, s, p) || [];
     chk.forEach((w) => warnings.push(`${CATALOG[p.type].name}: ${w}`));
   }
   if (!warnings.length) {
@@ -395,7 +411,9 @@ function redo() {
 function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, snapshot());
-  } catch { /* אחסון לא זמין */ }
+  } catch {
+    if (state.parts.some((p) => p.mesh)) toast('הפרויקט גדול מדי לשמירה אוטומטית — שמור אותו לקובץ');
+  }
 }
 
 let commitTimer = null;
@@ -411,7 +429,7 @@ function commit(delay = 0) {
 }
 
 // ---------- פעולות על חלקים ----------
-function addPart(type) {
+function addPart(type, extra = null) {
   const def = CATALOG[type];
   const solidsCount = state.parts.filter((p) => !p.hole).length;
   const part = {
@@ -423,14 +441,18 @@ function addPart(type) {
     rot: [0, 0, 0],
     color: PALETTE[solidsCount % PALETTE.length],
     hole: false,
+    scale: [1, 1, 1],
   };
+  if (def.defaultSketch) part.sketch = def.defaultSketch();
+  if (extra) Object.assign(part, extra);
   if (state.parts.length) part.pos = findFreeSpot(geometryFor(part));
   state.parts.push(part);
   if (resultMode) setResultMode(false);
   select(part.id);
   syncAll();
   commit();
-  toast(`נוסף: ${def.name}`);
+  toast(`נוסף: ${part.name}`);
+  if (def.defaultSketch && !extra) editSketch(part);
 }
 
 // מחפש מקום פנוי על המשטח (בספירלה מהמרכז) שלא חופף לחלקים קיימים
@@ -539,7 +561,7 @@ tc.addEventListener('dragging-changed', (e) => {
   orbit.enabled = !e.value;
   if (!e.value) {
     const part = partById(selectedId);
-    if (part && tc.mode === 'rotate') dropPart(part);
+    if (part && tc.mode !== 'translate') dropPart(part);
     renderProps();
     commit();
   }
@@ -550,6 +572,7 @@ tc.addEventListener('objectChange', () => {
   if (!part || !mesh) return;
   part.pos = mesh.position.toArray().map(r2);
   part.rot = [mesh.rotation.x, mesh.rotation.y, mesh.rotation.z].map((r) => Math.round(THREE.MathUtils.radToDeg(r)));
+  part.scale = mesh.scale.toArray().map((v) => Math.round(v * 1000) / 1000);
   updateTransformInputs(part);
 });
 
@@ -557,6 +580,7 @@ function setGizmoMode(mode) {
   tc.setMode(mode);
   $('modeMove').classList.toggle('active', mode === 'translate');
   $('modeRotate').classList.toggle('active', mode === 'rotate');
+  $('modeScale').classList.toggle('active', mode === 'scale');
 }
 
 // לחיצה בתצוגה בוחרת חלק
@@ -591,6 +615,86 @@ function renderCatalog() {
     b.addEventListener('click', () => addPart(type));
     el.appendChild(b);
   }
+  if (currentTab === 'custom') {
+    const b = document.createElement('button');
+    b.className = 'cat-item';
+    b.title = 'פתיחת קובץ STL קיים כדי לשנות אותו, לחתוך בו חורים או לשלב אותו עם חלקים אחרים';
+    b.innerHTML = '<span class="ic" aria-hidden="true">📥</span><span class="nm">ייבוא STL</span>';
+    b.addEventListener('click', () => $('fileStl').click());
+    el.appendChild(b);
+    const tip = document.createElement('p');
+    tip.className = 'hint';
+    tip.style.gridColumn = '1 / -1';
+    tip.textContent = 'איך ממדלים חופשי: משרטטים צורה, מושכים אותה לגוף, ומשלבים כמה גופים — מוצקים מתחברים, ו"חורים" נחתכים מהם.';
+    el.appendChild(tip);
+  }
+}
+
+// ---------- ייבוא STL ----------
+async function importSTL(file) {
+  try {
+    const buf = await file.arrayBuffer();
+    let geo = new STLLoader().parse(buf);
+    if (geo.index) geo = geo.toNonIndexed();
+    const pos = geo.attributes.position;
+    const tris = pos.count / 3;
+    if (!tris) throw new Error('הקובץ ריק');
+    if (tris > 300000) throw new Error(`יש בקובץ ${Math.round(tris / 1000)} אלף משולשים — זה כבד מדי לעריכה בדפדפן`);
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    const c = bb.getCenter(new THREE.Vector3());
+    geo.translate(-c.x, -c.y, -bb.min.z);
+    const positions = new Float32Array(geo.attributes.position.array);
+    const name = file.name.replace(/\.stl$/i, '');
+    addPart('mesh', { name, mesh: encodeMesh(positions) });
+    if (tris > 60000) toast(`יובא מודל כבד (${Math.round(tris / 1000)} אלף משולשים) — חיתוכים יהיו איטיים`);
+  } catch (err) {
+    console.error(err);
+    toast('הייבוא נכשל: ' + err.message);
+  }
+}
+$('fileStl').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (f) importSTL(f);
+});
+
+function editSketch(part) {
+  const def = CATALOG[part.type];
+  openSketchEditor({
+    sketch: part.sketch,
+    revolve: !!def.revolve,
+    title: `${def.name}: ${part.name || def.name}`,
+    onDone(sk) {
+      part.sketch = sk;
+      syncMesh(part);
+      dropPart(part);
+      renderProps();
+      commit();
+    },
+  });
+}
+
+// ---------- מערך (שכפול בתבנית) ----------
+function makeArray(part, opts) {
+  const copies = [];
+  for (let k = 1; k < opts.count; k++) {
+    const c = JSON.parse(JSON.stringify(part));
+    c.id = uid();
+    if (opts.kind === 'linear') {
+      c.pos = [r2(part.pos[0] + opts.dx * k), r2(part.pos[1] + opts.dy * k), part.pos[2]];
+    } else {
+      const a = THREE.MathUtils.degToRad((opts.angle / (opts.angle >= 360 ? opts.count : opts.count - 1)) * k);
+      const x = part.pos[0] - opts.cx, y = part.pos[1] - opts.cy;
+      c.pos = [r2(opts.cx + x * Math.cos(a) - y * Math.sin(a)), r2(opts.cy + x * Math.sin(a) + y * Math.cos(a)), part.pos[2]];
+      c.rot = [part.rot[0], part.rot[1], Math.round(part.rot[2] + THREE.MathUtils.radToDeg(a))];
+    }
+    copies.push(c);
+  }
+  state.parts.push(...copies);
+  syncAll();
+  commit();
+  toast(`נוצרו ${copies.length} עותקים`);
 }
 
 document.querySelectorAll('.tab').forEach((t) =>
@@ -646,7 +750,7 @@ function renderProps() {
       </div>
       <div class="group kbd-help">
         <h3>קיצורים</h3>
-        <kbd>W</kbd> הזזה · <kbd>E</kbd> סיבוב<br>
+        <kbd>W</kbd> הזזה · <kbd>E</kbd> סיבוב · <kbd>R</kbd> גודל<br>
         <kbd>←↑→↓</kbd> הזזה במ"מ (<kbd>Shift</kbd> = 10)<br>
         <kbd>PgUp</kbd>/<kbd>PgDn</kbd> למעלה/למטה<br>
         <kbd>Ctrl+D</kbd> שכפול · <kbd>Delete</kbd> מחיקה<br>
@@ -680,8 +784,20 @@ function renderProps() {
   nameGroup.appendChild(nameIn);
   el.appendChild(nameGroup);
 
+  if (def.defaultSketch) {
+    const sk = group('שרטוט');
+    const b = document.createElement('button');
+    b.className = 'primary';
+    b.style.width = '100%';
+    b.textContent = '✏ ערוך שרטוט';
+    b.addEventListener('click', () => editSketch(part));
+    sk.appendChild(b);
+    el.appendChild(sk);
+  }
+
   // מידות
   const dims = group('מידות');
+  if (!def.params.length) dims.hidden = true;
   for (const q of def.params) {
     const row = document.createElement('div');
     row.className = 'param';
@@ -759,6 +875,82 @@ function renderProps() {
   tr.appendChild(dropRow);
   el.appendChild(tr);
 
+  // קנה מידה ושיקוף
+  part.scale = part.scale || [1, 1, 1];
+  const sc = group('קנה מידה ושיקוף');
+  sc.appendChild(xyzInputs('scale', part.scale.map((v) => Math.round(v * 1000) / 10), (i, v) => {
+    if (!v) return;
+    part.scale[i] = v / 100;
+    syncMesh(part);
+    dropPart(part);
+    renderProps();
+    commit();
+  }));
+  const uni = document.createElement('div');
+  uni.className = 'row';
+  [50, 200].forEach((pct) => {
+    const b = document.createElement('button');
+    b.textContent = pct < 100 ? '− הקטן פי 2' : '+ הגדל פי 2';
+    b.addEventListener('click', () => {
+      part.scale = part.scale.map((v) => r2((v * pct) / 100 * 1000) / 1000);
+      syncMesh(part);
+      dropPart(part);
+      renderProps();
+      commit();
+    });
+    uni.appendChild(b);
+  });
+  sc.appendChild(uni);
+  const mir = document.createElement('div');
+  mir.className = 'row';
+  mir.style.marginTop = '6px';
+  ['X', 'Y', 'Z'].forEach((ax, i) => {
+    const b = document.createElement('button');
+    b.textContent = `⇋ שיקוף ${ax}`;
+    b.title = `היפוך החלק כמו במראה לאורך ציר ${ax}`;
+    b.addEventListener('click', () => {
+      part.scale[i] *= -1;
+      syncMesh(part);
+      dropPart(part);
+      renderProps();
+      commit();
+    });
+    mir.appendChild(b);
+  });
+  sc.appendChild(mir);
+  const sizeBox = new THREE.Box3().expandByObject(meshes.get(part.id), true).getSize(new THREE.Vector3());
+  const sizeP = document.createElement('p');
+  sizeP.className = 'hint';
+  sizeP.textContent = `גודל בפועל: ${fmt(sizeBox.x)} × ${fmt(sizeBox.y)} × ${fmt(sizeBox.z)} מ"מ`;
+  sc.appendChild(sizeP);
+  el.appendChild(sc);
+
+  // מערך
+  const ar = group('שכפול במערך');
+  ar.innerHTML += `
+    <div class="xyz" style="margin-bottom:6px">
+      <label>סוג<select id="arKind"><option value="linear">בשורה</option><option value="circular">במעגל</option></select></label>
+      <label>כמות<input type="number" id="arCount" value="4" min="2" max="100" step="1"></label>
+      <label class="ar-lin">מרווח X<input type="number" id="arDx" value="20" step="1"></label>
+      <label class="ar-lin">מרווח Y<input type="number" id="arDy" value="0" step="1"></label>
+      <label class="ar-cir" hidden>זווית כוללת<input type="number" id="arAngle" value="360" step="15"></label>
+      <label class="ar-cir" hidden>מרכז X<input type="number" id="arCx" value="0" step="1"></label>
+      <label class="ar-cir" hidden>מרכז Y<input type="number" id="arCy" value="0" step="1"></label>
+    </div>
+    <p class="hint ar-cir" hidden>העותקים מסודרים סביב נקודת המרכז, מסובבים בהתאם — מעולה לחורי ברגים במעגל או לשיניים.</p>
+    <button id="arGo" style="width:100%">צור מערך</button>`;
+  const ark = ar.querySelector('#arKind');
+  ark.addEventListener('change', () => {
+    ar.querySelectorAll('.ar-lin').forEach((x) => (x.hidden = ark.value !== 'linear'));
+    ar.querySelectorAll('.ar-cir').forEach((x) => (x.hidden = ark.value !== 'circular'));
+  });
+  ar.querySelector('#arGo').addEventListener('click', () => {
+    const v = (id) => parseFloat(ar.querySelector('#' + id).value) || 0;
+    const count = Math.max(2, Math.min(100, Math.round(v('arCount'))));
+    makeArray(part, { kind: ark.value, count, dx: v('arDx'), dy: v('arDy'), angle: v('arAngle') || 360, cx: v('arCx'), cy: v('arCy') });
+  });
+  el.appendChild(ar);
+
   // מראה וסוג
   const look = group('סוג');
   const holeLbl = document.createElement('label');
@@ -823,10 +1015,10 @@ function xyzInputs(kind, values, onChange) {
   wrap.style.marginBottom = '6px';
   ['X', 'Y', 'Z'].forEach((ax, i) => {
     const lbl = document.createElement('label');
-    lbl.textContent = kind === 'pos' ? ax : `סיבוב ${ax}`;
+    lbl.textContent = kind === 'pos' ? ax : kind === 'scale' ? `${ax} (%)` : `סיבוב ${ax}`;
     const inp = document.createElement('input');
     inp.type = 'number';
-    inp.step = kind === 'pos' ? 1 : 15;
+    inp.step = kind === 'pos' ? 1 : kind === 'scale' ? 5 : 15;
     inp.value = values[i];
     inp.dataset.kind = kind;
     inp.dataset.axis = i;
@@ -842,8 +1034,8 @@ function xyzInputs(kind, values, onChange) {
 
 function updateTransformInputs(part) {
   document.querySelectorAll('#props input[data-kind]').forEach((inp) => {
-    const arr = inp.dataset.kind === 'pos' ? part.pos : part.rot;
-    inp.value = arr[+inp.dataset.axis];
+    if (inp.dataset.kind === 'scale') inp.value = Math.round((part.scale || [1, 1, 1])[+inp.dataset.axis] * 1000) / 10;
+    else inp.value = (inp.dataset.kind === 'pos' ? part.pos : part.rot)[+inp.dataset.axis];
   });
 }
 
@@ -902,6 +1094,9 @@ function loadProjectData(data) {
       rot: (p.rot || [0, 0, 0]).map(Number),
       color: p.color || PALETTE[0],
       hole: !!p.hole,
+      scale: (p.scale || [1, 1, 1]).map(Number),
+      ...(p.sketch ? { sketch: p.sketch } : {}),
+      ...(p.mesh ? { mesh: String(p.mesh) } : {}),
     }));
   state = { name: String(data.name || 'פרויקט'), parts, settings: { ...DEFAULT_SETTINGS, ...(data.settings || {}) } };
   selectedId = null;
@@ -972,6 +1167,7 @@ $('btnCenter').addEventListener('click', centerAll);
 $('btnHome').addEventListener('click', homeView);
 $('modeMove').addEventListener('click', () => setGizmoMode('translate'));
 $('modeRotate').addEventListener('click', () => setGizmoMode('rotate'));
+$('modeScale').addEventListener('click', () => setGizmoMode('scale'));
 $('projectName').addEventListener('input', (e) => {
   state.name = e.target.value;
   commit(600);
@@ -1003,6 +1199,8 @@ window.addEventListener('keydown', (e) => {
     setGizmoMode('translate');
   } else if (e.key.toLowerCase() === 'e') {
     setGizmoMode('rotate');
+  } else if (e.key.toLowerCase() === 'r') {
+    setGizmoMode('scale');
   } else if (part && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key)) {
     e.preventDefault();
     const st = e.shiftKey ? 10 : 1;
